@@ -1,6 +1,6 @@
 Source code for paper on RBP motifs. housekeeping.py, nucleotide_comp.py, plotting.py, read_and_write.py, 
 cython_func.pyx, my_stats.py, bedtools_games.py and conservation.py are modules and not all of the code
-that they contain is relevant to the paper.
+that they contain is relevant to the paper. The R scripts are necessary for the module my_stats.py.
 
 RBP_motifs.py: obtaining the RBP motifs
 
