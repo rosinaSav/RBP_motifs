@@ -669,6 +669,7 @@ def get_SNP_density_core(picked, seqs, names, motifs, motif_lengths, SNP_dict, m
             seq = seqs[names.index(trans)]
             motif_pos = nc.get_motif_set_density(motifs, motif_lengths, seq, concat = True)[1]
             fourfold = nc.get_4fold_deg(seq)
+            fourfold = [i for i in fourfold (if seq[i] != "C") and (if seq[i] != "G")]
             motif_pos = [i for i in motif_pos if i in fourfold]
             site_counter = site_counter + len(motif_pos)
             if map_from_regions:
