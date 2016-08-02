@@ -10,8 +10,6 @@ overall_conservation.py: conservation parameters of the full set of RBP motifs.
 
 dinucl_cons.py: motif rate of evolution, calculated separately for each dinucleotide.
 
-SNP_density.py: SNP density of RBP motifs.
-
 RBP_density_all.py: density parameters of individual RBP motif sets, determined in full CDSs.
 
 check_amount_of_information_RBP.py: filtering RBP motif sets based on the information content of hits.
