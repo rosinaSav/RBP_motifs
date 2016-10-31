@@ -295,11 +295,12 @@ def GC_along_sequence(sequence, length):
             result[pos] = np.nan
     return(result)
 
-def GC4_along_sequence(sequence, length, remove_start = False):
+def GC4_along_sequence(sequence, length, remove_start = False, bases = None):
     '''
     Which fourfold degenerate sites in this sequence have GC?
     '''
-    GC = ["G", "C"]
+    if not bases:
+        bases = ["G", "C"]
     if length % 3 != 0:
         print("The required length has to be a multiple of 3!")
         raise Exception
@@ -311,7 +312,7 @@ def GC4_along_sequence(sequence, length, remove_start = False):
     third_pos = [i for i in range(2, len(sequence), 3)]
     for pos, site in enumerate(third_pos):
         if site in fourfold:
-            if sequence[site] in GC:
+            if sequence[site] in bases:
                 result[pos] = 1
             else:
                 result[pos] = 0
@@ -322,7 +323,7 @@ def GC4_along_sequence(sequence, length, remove_start = False):
 
 def GC_along_sequence_set(names, sequences, length, fs = None):
     '''
-    Calculate GC at the different sites in a set of sequences. Rteurn also the number of data points.
+    Calculate GC at the different sites in a set of sequences. Return also the number of data points.
     '''
     names = [names[pos] for pos, i in enumerate(names) if len(sequences[pos]) >= length]
     sequences = [i for i in sequences if len(i) >= length]
@@ -339,17 +340,19 @@ def GC_along_sequence_set(names, sequences, length, fs = None):
     n = GC_values.shape[0]
     return(result, n)
 
-def GC4_along_sequence_set(names, sequences, length, remove_start = False, fs = None, require_a_member = True):
+def GC4_along_sequence_set(names, sequences, length, remove_start = False, fs = None, require_a_member = True, bases = None):
     '''
     Calculate GC4 at the different sites in a set of sequences.
     '''
+    if not bases:
+        bases = ["G", "C"]
     names = [names[pos] for pos, i in enumerate(names) if len(sequences[pos]) >= length]
     sequences = [i for i in sequences if len(i) >= length]
     GC4_values = {}
     for i in range(len(names)):
         if i % 100 == 0:
             print(i)
-        GC4_values[names[i]] = GC4_along_sequence(sequences[i], length, remove_start = remove_start)
+        GC4_values[names[i]] = GC4_along_sequence(sequences[i], length, remove_start = remove_start, bases = bases)
     print(len(GC4_values))
     if fs:
         GC4_values = fs.average_over_families_2d(GC4_values, remove_nans = True, nan_for_None = True, require_a_member = require_a_member, remove_empty = True)
@@ -446,12 +449,12 @@ def get_GC(sequence, alternative_bases = None):
     GC = hits/len(sequence)
     return(GC)
 
-def get_GC4(sequence,phase,alternative_bases = None):
+def get_GC4(sequence, phase, alternative_bases = None):
     '''
     Get the GC content at the fourfold degenerate bases of a sequence.
     '''
     #make sure the sequence starts and ends with full codons.
-    sequence = trim_sequence(sequence,phase)
+    sequence = trim_sequence(sequence, phase)
     #figure out where the 4-fold degenerate sites are.
     fourfold_deg_pos = get_4fold_deg(sequence)
     if not fourfold_deg_pos:
@@ -653,7 +656,7 @@ def get_neighbours(motifs, individual = False):
     results = [i for i in results if i not in motifs]
     return(results)
 
-def get_sequence_set_density(fasta_name, bed_name, motifs, simulants, n_sim, densities_output_file_name, sim_densities_output_file_name, positions_output_file_name, sim_positions_output_folder_name, feature_set = None, concat = False, positions = True, verbose = False, workers = None, trim = False):
+def get_sequence_set_density(fasta_name, bed_name, motifs, simulants, n_sim, densities_output_file_name, sim_densities_output_file_name, positions_output_file_name, sim_positions_output_folder_name, feature_set = None, concat = False, positions = True, verbose = False, workers = None, trim = False, two_seqs = False):
     '''
     Determine the density of a set of motifs in the sequences in a fasta file.
     '''
@@ -662,6 +665,10 @@ def get_sequence_set_density(fasta_name, bed_name, motifs, simulants, n_sim, den
     NDs = {}
     lengths = {}
     fasta_names, fasta_seq = rw.read_fasta(fasta_name)
+    if two_seqs:
+        fasta_seq = [i.split("|") for i in fasta_seq]
+        fasta_seq = [i[0] for i in fasta_seq]
+        fasta_seq = ["".join([j for j in i if j in _canon_bases_]) for i in fasta_seq]
     bed_dict = {}
     #if, for instance, the sequence names in your fasta file refer to coordinates and not to transcript names,
     #you can supply a bed file that has one record per sequence in the fasta file (in the same order!) and
@@ -1284,7 +1291,7 @@ def motif_to_regex(motifs):
     regex = [re.compile("".join([i[0],"(?=",i[1:],")"])) for i in motifs]
     return(regex)
 
-def motifs_from_peaks(bed, genome, k, n, output_file = None, fasta = None):
+def motifs_from_peaks(bed, genome, k, n, output_file = None, fasta = None, exclude_overlaps = False):
     '''
     Given a bed file, use RSAT to determine the n k-mers that are most over-represented.
     '''
@@ -1294,8 +1301,11 @@ def motifs_from_peaks(bed, genome, k, n, output_file = None, fasta = None):
         fasta_from_intervals(bed, fasta, genome, force_strand = True)
     if not output_file:
         output_file = "temp_data/rsat_out.txt"
-    run_process(["oligo-analysis", "-i", fasta, "-format", "fasta", "-seqtype", "dna", "-o", output_file, "-l",
-                k, "-markov", 2, "-sort", "-1str", "-nogrouprc"])
+    arguments = ["oligo-analysis", "-i", fasta, "-format", "fasta", "-seqtype", "dna", "-o", output_file, "-l",
+                k, "-markov", 1, "-return", "occ,proba,rank", "-sort", "-1str", "-nogrouprc"]
+    if exclude_overlaps:
+        arguments.append("-noov")
+    run_process(arguments)
     data = rw.read_many_fields(output_file, "\t")
     data = data[1: (n + 1)]
     data = [i[0].upper() for i in data]
@@ -1636,6 +1646,34 @@ def trim_sequence(sequence, phase):
         return(sequence[:-1])
     else:
         return(sequence[:-2])
+
+def trim_sequence_report(sequence, phase):
+    '''
+    Rather than simply trim a sequence, also return a tuple specifying how much was trimmed.
+    '''
+    output = [None, None]
+    #trim the start based on the phase information that was given
+    if phase == 0:
+        output[0] = 0
+    elif phase == 1:
+        output[0] = 2
+        sequence = sequence[2:]
+    elif phase == 2:
+        output[0] = 1
+        sequence = sequence[1:]
+    else:
+        print("Invalid phase information!")
+        raise Exception
+    #trim the end based on the length of the remaining sequence.
+    if len(sequence)%3 == 0:
+        output[1] = 0
+    elif len(sequence)%3 == 1:
+        output[1] = 1
+        sequence = sequence[:-1]
+    else:
+        output[1] = 2
+        sequence = sequence[:-2]
+    return(output, sequence)
 
 def unravel_consensus(consensus):
     '''

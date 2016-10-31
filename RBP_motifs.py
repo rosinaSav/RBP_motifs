@@ -1,4 +1,4 @@
-from housekeeping import flatten, overlap, parse_arguments, print_elements
+from housekeeping import flatten, list_to_dict, overlap, parse_arguments, print_elements
 import matplotlib.pyplot as plt
 import nucleotide_comp as nc
 import numpy as np
@@ -22,22 +22,24 @@ def main():
     RNAcompete_information: path to summary file from CIS-BP RNA
     RNAcompete_PWMs: path to directory containing CIS-BP RNA PWMs
     final_motifs_file_name: name for output file
-    plot_name: file for plot diplsyaing the distribution of motif set sizes
+    plot_name: file for plot displaying the distribution of motif set sizes
+    species: the species for which motifs are required
     '''
 
     description = "Compile a set of motifs putatively recognized by RNA-binding proteins."
-    args = parse_arguments(description, ["upper_threshold", "lower_threshold", "RBPDB_experiments", "RBPDB_proteins", "RBPDB_PWMs", "pwm_dir", "RBPmap_PSSMs", "SFmap_proteins", "RNAcompete_information", "RNAcompete_PWMs", "final_motifs_file_name", "plot_name"], ints = [0, 1])
-    [upper_threshold, lower_threshold, RBPDB_experiments, RBPDB_proteins, RBPDB_PWMs, pwm_dir, RBPmap_PSSMs, SFmap_proteins, RNAcompete_information, RNAcompete_PWMs, final_motifs_file_name, plot_name] = [args.upper_threshold, args.lower_threshold, args.RBPDB_experiments, args.RBPDB_proteins, args.RBPDB_PWMs, args.pwm_dir, args.RBPmap_PSSMs, args.SFmap_proteins, args.RNAcompete_information, args.RNAcompete_PWMs, args.final_motifs_file_name, args.plot_name]
+    args = parse_arguments(description, ["upper_threshold", "lower_threshold", "RBPDB_experiments", "RBPDB_proteins", "RBPDB_PWMs", "pwm_dir", "RBPmap_PSSMs", "SFmap_proteins", "RNAcompete_information", "RNAcompete_PWMs", "final_motifs_file_name", "plot_name", "species"], ints = [0, 1])
+    [upper_threshold, lower_threshold, RBPDB_experiments, RBPDB_proteins, RBPDB_PWMs, pwm_dir, RBPmap_PSSMs, SFmap_proteins, RNAcompete_information, RNAcompete_PWMs, final_motifs_file_name, plot_name, species] = [args.upper_threshold, args.lower_threshold, args.RBPDB_experiments, args.RBPDB_proteins, args.RBPDB_PWMs, args.pwm_dir, args.RBPmap_PSSMs, args.SFmap_proteins, args.RNAcompete_information, args.RNAcompete_PWMs, args.final_motifs_file_name, args.plot_name, args.species]
 
     db_fields = rw.read_many_fields(RBPDB_experiments, ",")
     db_fields = db_fields[1:]
     print("There are {0} RBPDB experiments.".format(len(db_fields)))
     db_proteins = rw.read_many_fields(RBPDB_proteins, ",")
-    db_proteins = [i for i in db_proteins if i[6] == "Homo sapiens"]
+    #species is "Homo sapiens" or "Mus musculus"
+    db_proteins = [i for i in db_proteins if i[6] == species]
     protein_names = sorted(list(set([i[4] for i in db_proteins])))
     db_fields = [i for i in db_fields if i[3] in protein_names]
     protein_number_before = (len(list(set([i[3] for i in db_fields]))))
-    print("{0} were performed in H. sapiens.\n".format(len(db_fields)))
+    print("{0} were performed in {1}.\n".format(len(db_fields), species))
     db_fields = [i for i in db_fields if i[2] != ""]
     protein_number_after = (len(list(set([i[3] for i in db_fields]))))
     db_fields = [[i[3], "RBPDB", i[0], i[1], i[2]] for i in db_fields]
@@ -61,22 +63,31 @@ def main():
     protein_number_after = (len(list(set([i[0] for i in db_fields]))))
     print("After adding additional sequences from SELEX PWMs (RBPDB), there are {0} proteins.\n".format(protein_number_after))
 
+    if species == "Mus musculus":
+        RBPmap_proteins = rw.read_many_fields("RBP/RBPmap_proteins.csv", ",")
+        RBPmap_proteins = list_to_dict(RBPmap_proteins, 0, 1)
+        RNAc_source = [i for i in RBPmap_proteins if "23846655" in RBPmap_proteins[i]]
+    else:
+        RNAc_source = []
+
     for file_name in os.listdir(RBPmap_PSSMs):
+        #RBPmap and SFmap don't distinguish between human and mouse motifs
         if "human" in file_name:
             file_name_split = file_name.split("_")
             protein_name = file_name_split[0]
-            initial_pssm = rw.read_many_fields(os.path.join(RBPmap_PSSMs, file_name), delimiter = "\t")
-            current_pssm = initial_pssm[1:]
-            current_pssm = [i[1:] for i in current_pssm]
-            for i in range(len(current_pssm)):
-                current_pssm[i] = [float(j) for j in current_pssm[i]]
-            consensus = nc.consensus_from_PWM(current_pssm, bases, 0.25, transform = True)
-            protein_name = list(protein_name)
-            if protein_name[:4] == ["S", "R", "S", "F"]:
-                protein_name[:4] = ["S", "F", "R", "S"]
-            protein_name = "".join(protein_name)
-            new_record = [protein_name, "RBPmap_PWM", "NULL", "various", consensus]
-            db_fields.append(new_record)
+            if protein_name not in RNAc_source:
+                initial_pssm = rw.read_many_fields(os.path.join(RBPmap_PSSMs, file_name), delimiter = "\t")
+                current_pssm = initial_pssm[1:]
+                current_pssm = [i[1:] for i in current_pssm]
+                for i in range(len(current_pssm)):
+                    current_pssm[i] = [float(j) for j in current_pssm[i]]
+                consensus = nc.consensus_from_PWM(current_pssm, bases, 0.25, transform = True)
+                protein_name = list(protein_name)
+                if protein_name[:4] == ["S", "R", "S", "F"]:
+                    protein_name[:4] = ["S", "F", "R", "S"]
+                protein_name = "".join(protein_name)
+                new_record = [protein_name, "RBPmap_PWM", "NULL", "various", consensus]
+                db_fields.append(new_record)
 
     protein_number_after = (len(list(set([i[0] for i in db_fields]))))
     print("After adding additional sequences from RBPmap PSSMs, there are {0} proteins.\n".format(protein_number_after))
@@ -97,8 +108,11 @@ def main():
     print("After adding motifs from SFmap, there are {0} proteins.\n".format(protein_number_after))
 
     RNAc = rw.read_many_fields(RNAcompete_information, delimiter = "\t")
-    RNAc = [i for i in RNAc if i[3] != "." and i[8] == "D"]
-    RNAc = RNAc[1:] 
+    RNAc = [i for i in RNAc[1:] if i]
+    if species == "Homo sapiens":
+        RNAc = [i for i in RNAc if i[3] != "." and i[8] == "D"]
+    if species == "Mus musculus":
+        RNAc = [i for i in RNAc if i[3] != "."]
 
     PSSM_folder = RNAcompete_PWMs
     for record in RNAc:
@@ -120,7 +134,7 @@ def main():
             db_fields.append(new_record)
 
     protein_number_after = (len(list(set([i[0] for i in db_fields]))))
-    print("After adding direct motifs from CIS-BP RNA, there are {0} proteins.\n".format(protein_number_after))
+    print("After adding motifs from CIS-BP RNA, there are {0} proteins.\n".format(protein_number_after))
 
     to_delete = []
     for pos, i in enumerate(db_fields):
@@ -149,37 +163,64 @@ def main():
     protein_number_after = (len(list(set([i[0] for i in db_fields]))))
     print("After only keeping motifs of length {0}-{1} bp, {2} proteins remain.\n".format(lower_threshold, upper_threshold, protein_number_after))
 
+    protein_names = list(set([i[0] for i in db_fields]))
+
+    if species == "Mus musculus":
+        protein_names_file = "RBP/RBP_names_for_checking.txt"
+        with open(protein_names_file, "w") as file:
+            for name in protein_names:
+                file.write("{0}\n".format(name))
+        MGI_file = "RBP/MGI_correspondances.txt"
+        MGI = rw.read_many_fields(MGI_file, "\t")
+        MGI_names_all = [i[0] for i in MGI[1:]]
+        found = [i[0] for i in MGI if i[0] == i[3]]
+        MGI = {i[0]: i[3] for i in MGI[1:] if i[0] not in found}
+
+    to_delete = []
     for pos, i in enumerate(db_fields):
-        if i[0] == "A2BP1" or i[0] == "FOX1":
-            db_fields[pos][0] = "RBFOX1"
-        elif i[0] == "SFRS13A":
-            db_fields[pos][0] = "SRSF10"
-        elif i[0][:6] == "BRUNOL":
-            db_fields[pos][0] = "CELF{0}".format(i[0][-1])
-        elif i[0] == "CUGBP":
-            db_fields[pos][0] = "CELF1"
-        elif i[0] == "Fusip1":
-            db_fields[pos][0] = "SRSF10"
-        elif i[0][:4] == "SFRS":
-            db_fields[pos][0] = "SRSF{0}".format(i[0][4:])
-        elif i[0] == "HuR":
-            db_fields[pos][0] = "ELAVL1"
-        elif i[0] == "MBNL":
-            db_fields[pos][0] = "MBNL1"
-        elif i[0] == "PTB":
-            db_fields[pos][0] = "PTBP1"
-        elif i[0] == "QK1":
-            db_fields[pos][0] = "QKI"
-        elif i[0] == "RBM9":
-            db_fields[pos][0] = "RBFOX2"
-        elif i[0] == "STAR-PAP":
-            db_fields[pos][0] = "TUT1"
-        elif i[0] == "YB-1":
-            db_fields[pos][0] = "YBX1"
-        elif i[0] == "hnRNPK":
-            db_fields[pos][0] = "HNRNPK"
-        elif i[0] == "hnRNPLL" or i[0] == "HNRPLL":
-            db_fields[pos][0] = "HNRNPLL"
+        if species == "Mus musculus":
+            db_fields[pos][0] = "".join([db_fields[pos][0][0].upper(), db_fields[pos][0][1:].lower()])
+            #will get rid of Hnrnpcl1, which didn't return anything in the MGI search.
+            if db_fields[pos][0] not in MGI_names_all:
+                to_delete.append(pos)
+            else:
+                if db_fields[pos][0] not in found:
+                    db_fields[pos][0] = MGI[db_fields[pos][0]]
+        elif species == "Homo sapiens":
+            if i[0] == "A2BP1" or i[0] == "FOX1":
+                db_fields[pos][0] = "RBFOX1"
+            elif i[0] == "SFRS13A":
+                db_fields[pos][0] = "SRSF10"
+            elif i[0][:6] == "BRUNOL":
+                db_fields[pos][0] = "CELF{0}".format(i[0][-1])
+            elif i[0] == "CUGBP":
+                db_fields[pos][0] = "CELF1"
+            elif i[0] == "Fusip1":
+                db_fields[pos][0] = "SRSF10"
+            elif i[0][:4] == "SFRS":
+                db_fields[pos][0] = "SRSF{0}".format(i[0][4:])
+            elif i[0] == "HuR":
+                db_fields[pos][0] = "ELAVL1"
+            elif i[0] == "MBNL":
+                db_fields[pos][0] = "MBNL1"
+            elif i[0] == "PTB":
+                db_fields[pos][0] = "PTBP1"
+            elif i[0] == "QK1":
+                db_fields[pos][0] = "QKI"
+            elif i[0] == "RBM9":
+                db_fields[pos][0] = "RBFOX2"
+            elif i[0] == "STAR-PAP":
+                db_fields[pos][0] = "TUT1"
+            elif i[0] == "YB-1":
+                db_fields[pos][0] = "YBX1"
+            elif i[0] == "hnRNPK":
+                db_fields[pos][0] = "HNRNPK"
+            elif i[0] == "hnRNPLL" or i[0] == "HNRPLL":
+                db_fields[pos][0] = "HNRNPLL"
+
+    db_fields = [i for pos, i in enumerate(db_fields) if pos not in to_delete]
+
+    protein_names = list(set([i[0] for i in db_fields]))
 
     protein_number_after = (len(list(set([i[0] for i in db_fields]))))
     print("After cleaning up protein IDs, {0} proteins remain.\n".format(protein_number_after))
@@ -191,11 +232,14 @@ def main():
         else:
             protein_dict[i[0]].append(i)
 
-    del protein_dict["PPIE"]
-    del protein_dict["MIR1236"]
-    del protein_dict["PABPC4"]
-
-    print("After removing PPIE, PABPC4 and MIR1236, {0} proteins remain.\n".format(len(protein_dict)))
+    if species == "Homo sapeins":
+        del protein_dict["PPIE"]
+        del protein_dict["MIR1236"]
+        del protein_dict["PABPC4"]
+        print("After removing PPIE, PABPC4 and MIR1236, {0} proteins remain.\n".format(len(protein_dict)))
+    elif species == "Mus musculus":
+        del protein_dict["Pabpc4"]
+        print("After removing Pabpc4, {0} proteins remain.\n".format(len(protein_dict)))
 
     for i in protein_dict:
         if i == "ELAVL1":
@@ -214,12 +258,6 @@ def main():
 
     for i in protein_dict:
         protein_dict[i] = [[j[0], j[4], j[1], j[2], j[3]] for j in protein_dict[i]] 
-
-    for i in sorted(list(protein_dict.keys())):
-        print(i)
-        for j in protein_dict[i]:
-            print(j)
-        print("\n")
 
     print("\n")
     print("Writing motifs to {0}.\n".format(final_motifs_file_name))

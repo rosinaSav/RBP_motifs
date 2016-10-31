@@ -10,8 +10,8 @@ import read_and_write as rw
 def main():
 
     description = "Calculate the combined density of a set of motif sets."
-    args = parse_arguments(description, ["motifs_file_name", "summary_file_name", "dataset_name", "correspondances_file_name", "alignment_folder_name", "output_folder_name", "output_file_name", "n_sim", "features_file_name", "genome", "families_file_name", "fasta_name", "ND_column", "output_suffix", "validity_folder_name", "negative_ND", "new_filters", "upper_quarter", "lower_quarter", "full_set", "gene_families", "newer_filters"], ints = [7, 12], flags = [15, 16, 17, 18, 19, 20, 21])
-    [motifs_file_name, summary_file_name, dataset_name,  correspondances_file_name, alignment_folder_name, output_folder_name, output_file_name, n_sim, features_file_name, genome, families_file_name, fasta_name, ND_column, output_suffix, validity_folder_name, negative_ND, new_filters, upper_quarter, lower_quarter, full_set, gene_families, newer_filters] = [args.motifs_file_name, args.summary_file_name, args.dataset_name,  args.correspondances_file_name, args.alignment_folder_name, args.output_folder_name, args.output_file_name, args.n_sim, args.features_file_name, args.genome, args.families_file_name, args.fasta_name, args.ND_column, args.output_suffix, args.validity_folder_name, args.negative_ND, args.new_filters, args.upper_quarter, args.lower_quarter, args.full_set, args.gene_families, args.newer_filters]
+    args = parse_arguments(description, ["motifs_file_name", "summary_file_name", "dataset_name", "correspondances_file_name", "alignment_folder_name", "output_folder_name", "output_file_name", "n_sim", "features_file_name", "genome", "families_file_name", "fasta_name", "ND_column", "output_suffix", "validity_folder_name", "negative_ND", "new_filters", "upper_quarter", "lower_quarter", "full_set", "gene_families", "newer_filters", "baseml"], ints = [7, 12], flags = [15, 16, 17, 18, 19, 20, 21, 22])
+    [motifs_file_name, summary_file_name, dataset_name,  correspondances_file_name, alignment_folder_name, output_folder_name, output_file_name, n_sim, features_file_name, genome, families_file_name, fasta_name, ND_column, output_suffix, validity_folder_name, negative_ND, new_filters, upper_quarter, lower_quarter, full_set, gene_families, newer_filters, baseml] = [args.motifs_file_name, args.summary_file_name, args.dataset_name,  args.correspondances_file_name, args.alignment_folder_name, args.output_folder_name, args.output_file_name, args.n_sim, args.features_file_name, args.genome, args.families_file_name, args.fasta_name, args.ND_column, args.output_suffix, args.validity_folder_name, args.negative_ND, args.new_filters, args.upper_quarter, args.lower_quarter, args.full_set, args.gene_families, args.newer_filters, args.baseml]
 
     #make a dictionary with RBPs as keys and ND/p values as values.
     if summary_file_name != "None":
@@ -26,12 +26,11 @@ def main():
     #make a dictionary with RBPs as keys and lists of associated motifs as values        
     motifs = rw.read_motifs(motifs_file_name)
 
-    #which RBPs fulfill the necessary information content criteria?
-    validity = rw.read_many_fields("{0}/sufficient_information_fraction05.csv".format(validity_folder_name), "\t")
-    validity = list_to_dict(validity, 0, 1)
-
     #if you only want to be using a subset of the motifs
     if not full_set:
+        #which RBPs fulfill the necessary information content criteria?
+        validity = rw.read_many_fields("{0}/sufficient_information_fraction05.csv".format(validity_folder_name), "\t")
+        validity = list_to_dict(validity, 0, 1)
         #motifs with negative ND
         if negative_ND:
             motifs = [motifs[RBP] for RBP in motifs if (summary_dict[RBP] < 0) and (validity[RBP] == "True")]
@@ -51,22 +50,32 @@ def main():
     make_dir(output_folder_name)
 
     #prepare a Feature_Set object (a genome gtf associated to a particular genome and to a set of transcript identifiers)
-    fs = Feature_Set(features_file_name, genome)
-    fs.set_dataset(dataset_name)
-    transcripts = fs.get_transcripts()
-    CDS = fs.get_CDS()
-    #paralogous families
-    families = rw.read_families(families_file_name)
-    #the families file might use gene identifiers, whereas the Feature_Set object uses transcript identifiers
-    if gene_families:
-        families = fs.convert_families_to_ENST(families, transcripts)
-    fs.add_families(families)
-    #pick a random member from each paralogous family
-    picked_trans = fs.pick_random_members()
-    gene_name_dict = fs.get_gene_name_dict(transcripts)
-    picked = [fs.convert_between_ENST_and_ENSG(i, gene_name_dict, "ENSG") for i in picked_trans]
-    
-    print(len(picked))
+    if features_file_name != "None":
+        fs = Feature_Set(features_file_name, genome)
+        fs.set_dataset(dataset_name)
+        transcripts = fs.get_transcripts()
+        CDS = fs.get_CDS()
+        #paralogous families
+        families = rw.read_families(families_file_name)
+        #the families file might use gene identifiers, whereas the Feature_Set object uses transcript identifiers
+        if gene_families:
+            families = fs.convert_families_to_ENST(families, transcripts)
+        fs.add_families(families)
+        #pick a random member from each paralogous family
+        picked_trans = fs.pick_random_members()
+        names = rw.read_fasta(fasta_name)[0]
+        if picked_trans[0] not in names:
+            picked = [fs.convert_between_ENST_and_ENSG(i, transcripts, "ENSG") for i in picked_trans]
+        else:
+            picked = picked_trans
+        print(len(picked))
+    else:
+        picked = None
+
+    if baseml:
+        method = "baseml"
+    else:
+        method = "gy"
 
     #write the input data for the conservation analysis into a file
     input_dict_file_name = "temp_data/temp_{0}.txt".format(random.random())
@@ -84,7 +93,7 @@ def main():
         #file where the simulants dS values will be stored
         sim_output_file_name = "{0}/{1}_sim_ds.csv".format(output_folder_name, output_suffix)
         #calculate dS within motifs and simulants
-        output_dict = conservation.dS_from_hits(motifs, alignment_folder_name, input_dict_file_name, n_sim = n_sim, simulants = simulants, sim_output_file_name = sim_output_file_name, method = "gy")
+        output_dict = conservation.dS_from_hits(motifs, alignment_folder_name, input_dict_file_name, n_sim = n_sim, simulants = simulants, sim_output_file_name = sim_output_file_name, method = method)
         print(output_dict)
         print("\n")
         #write to output file

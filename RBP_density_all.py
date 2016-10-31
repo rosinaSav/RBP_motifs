@@ -3,6 +3,7 @@ from bedtools_games import Feature_Set
 from housekeeping import make_dir
 import nucleotide_comp as nc
 import numpy as np
+import os
 import read_and_write as rw
 import sys
 
@@ -25,9 +26,10 @@ def main():
     parser.add_argument("--new_filters", dest = "new_filters", action = "store_true", help = "Should simulants be generated using the old method but capping mononucleotide runs and removing existing motifs?")
     parser.add_argument("--no_concat", dest = "no_concat", action = "store_true", help = "Should a density be calculated for each gene?")
     parser.add_argument("--newer_filters", dest = "newer_filters", action = "store_true", help = "Like new_filters, but also not allowing duplicates in the simulants and without concatenation.")
+    parser.add_argument("--two_seqs", dest = "two_seqs", action = "store_true", help = "Set to true if the sequence fasta has two sequences separated by a pipe in each line.")
 
     args = parser.parse_args()
-    [RBP_file_name, output_folder_name, output_file_name, input_file_name, n_sim, features_file_name, genome, dataset_name, families_file_name, simulants_within, sequence_control, remove_stops, markov, new_filters, no_concat, newer_filters] = [args.RBP_file_name,
+    [RBP_file_name, output_folder_name, output_file_name, input_file_name, n_sim, features_file_name, genome, dataset_name, families_file_name, simulants_within, sequence_control, remove_stops, markov, new_filters, no_concat, newer_filters, two_seqs] = [args.RBP_file_name,
                                                                                                                                                                     args.output_folder_name,
                                                                                                                                                                     args.output_file_name,
                                                                                                                                                                     args.input_file_name,
@@ -42,7 +44,8 @@ def main():
                                                                                                                                                                                                              args.markov,
                                                                                                                                                                                                                           args.new_filters,
                                                                                                                                                                                                                                      args.no_concat,
-                                                                                                                                                                                                                                                    args.newer_filters]   
+                                                                                                                                                                                                                                                    args.newer_filters,
+                                                                                                                                                                                                                                                              args.two_seqs]   
     make_dir(output_folder_name)
 
     #if you want to average over families
@@ -90,7 +93,7 @@ def main():
                                                        "{0}/{1}_{2}_sim_density.csv".format(output_folder_name, RBP, output_suffix),
                                                        "{0}/{1}_{2}_positions.csv".format(output_folder_name, RBP, output_suffix),
                                                        "{0}/{1}_{2}_sim_positions".format(output_folder_name, RBP, output_suffix),
-                                                       concat = concat, positions = False, feature_set = fs)
+                                                       concat = concat, positions = False, feature_set = fs, two_seqs = two_seqs)
             if concat:
                 current_record = [RBP, str(current_dict["density"]), str(np.mean(current_dict["simulated densities"])), str(current_dict["ND"]), str(current_dict["effective p"]), str(current_dict["Z"]), str(current_dict["depletion p"]), str(len(curr_motifs)), str(current_dict["simulant sd"])]
             else:

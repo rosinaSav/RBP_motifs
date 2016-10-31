@@ -10,8 +10,8 @@ from Bio.Align.Applications import MuscleCommandline
 from Bio.SeqRecord import SeqRecord
 from Bio.Align import MultipleSeqAlignment
 from Bio import AlignIO
-from Bio.Phylo.PAML import codeml, yn00
-from housekeeping import flatten, line_count, list_to_dict, overlap, print_elements, remove_file, run_in_parallel, run_process
+from Bio.Phylo.PAML import baseml, codeml, yn00
+from housekeeping import flatten, line_count, list_to_dict, make_dir, overlap, print_elements, remove_file, run_in_parallel, run_process
 import my_stats as ms
 import nucleotide_comp as nc
 import numpy as np
@@ -19,6 +19,7 @@ from operations_on_reads import bound_unbound_pairs, convert2bed, significant_pe
 import os
 import random
 import read_and_write as rw
+import shutil
 import string
 import structure as struct
 import tempfile
@@ -59,6 +60,9 @@ def calculate_dS_core(motifs, motif_lengths, input_dict_file_name, alignment_fol
     if not method:
         method = "yn"
     temp_file_names = ["temp_data/temp_alignment{0}.phy".format(random.random()) for i in range(4)]
+    two_seqs = False
+    if method == "baseml":
+        two_seqs = True
     with open(temp_file_names[0], "w") as output_file, open(temp_file_names[1], "w") as orth_output_file, open(temp_file_names[2], "w") as header_file, open(input_dict_file_name) as input_file:
         #write a phylip file containing a concatenation of all the bases overlapping motif hits in a set of sequences, aligned to the orthologous sequence in another species
         #most of the input data is read from the file in input_dict_file_name (prepared in input_dict_for_dS below)
@@ -85,27 +89,32 @@ def calculate_dS_core(motifs, motif_lengths, input_dict_file_name, alignment_fol
                 two_fold = input_dict["two-fold"]
                 four_fold = input_dict["four-fold"]
             #expand motif hit positions to get full codons
-            [positions, to_change_two_fold, to_change_four_fold] = fill_codons(positions, two_fold, four_fold)
+            if not two_seqs:
+                [positions, to_change_two_fold, to_change_four_fold] = fill_codons(positions, two_fold, four_fold)
             #the aligned full CDS from either species
             aligned_sequences = input_dict["aligned sequences"]
             #convert positions in the CDS to positions in the aligned sequence (which has dashes for gaps)
             aligned_positions = get_aligned_positions(aligned_sequences, positions)                     
-            if (len(aligned_positions)%3) != 0:
+            if not two_seqs and (len(aligned_positions)%3) != 0:
                 print("Problem filling up the codons!")
                 raise Exception
-            #convert the positions of two- and fourfold degenerate Arginine/Leucine codons to indices in the aligned sequence
-            to_change_two_fold = get_aligned_positions(aligned_sequences, to_change_two_fold)
-            to_change_four_fold = get_aligned_positions(aligned_sequences, to_change_four_fold)
-            #change the Leucine/Arginine codons to either Glutamic acid or Alanine codons depending on the degeneracy of the first base
-            temp_aligned_sequences = changeLeuArg(to_change_two_fold, to_change_four_fold, aligned_sequences)
+            if not two_seqs:
+                #convert the positions of two- and fourfold degenerate Arginine/Leucine codons to indices in the aligned sequence
+                to_change_two_fold = get_aligned_positions(aligned_sequences, to_change_two_fold)
+                to_change_four_fold = get_aligned_positions(aligned_sequences, to_change_four_fold)
+                #change the Leucine/Arginine codons to either Glutamic acid or Alanine codons depending on the degeneracy of the first base
+                temp_aligned_sequences = changeLeuArg(to_change_two_fold, to_change_four_fold, aligned_sequences)
+            else:
+                temp_aligned_sequences = aligned_sequences.copy()
             #extract the bases that correspond to the motif hit positions from the aligned sequence, for both species
             temp_seq = [0 for pos in aligned_positions]
             temp_orth_seq = temp_seq.copy()
             for enum, pos in enumerate(aligned_positions):
                 temp_seq[enum] = temp_aligned_sequences[0][pos]
                 temp_orth_seq[enum] = temp_aligned_sequences[1][pos]
-            #remove in-frame stop codons from the sequences or codeml will sit quietly and do nothing
-            [temp_seq,temp_orth_seq] = remove_stops(temp_seq, temp_orth_seq)
+            if not two_seqs:
+                #remove in-frame stop codons from the sequences or codeml will sit quietly and do nothing
+                [temp_seq, temp_orth_seq] = remove_stops(temp_seq, temp_orth_seq)
             #write motif hit sequences to file
             output_file.write("".join(temp_seq))
             orth_output_file.write("".join(temp_orth_seq))
@@ -124,7 +133,11 @@ def calculate_dS_core(motifs, motif_lengths, input_dict_file_name, alignment_fol
             cml_input = temp_file_names[3]
             cml_output = "{0}.out".format(temp_file_names[3][:-4])
             ctl_file = "{0}.ctl".format(random.random())
-            ds = run_codeml(cml_input, cml_output, ctl_file = ctl_file, method = method)["dS"]
+            if two_seqs:
+                variable = "tree length"
+            else:
+                variable = "dS"
+            ds = run_codeml(cml_input, cml_output, ctl_file = ctl_file, method = method)[variable]
             #clean up temp files
             for i in temp_file_names:
                 os.remove(i)
@@ -545,7 +558,6 @@ def get_aligned_positions(aligned_sequences, positions):
     if "-" in aligned_sequences[0]:#no need to make adjustments if there are no indels in the alignment
         aligned_sequences[0] = np.array(aligned_sequences[0])
         hyphens = np.where(aligned_sequences[0] == "-")[0] #where are the dashes in the alignment?
-        hyphens_short = hyphens[0::3] #it was a protein alignment so the dashes come in threes. only store the position of the first dash.
         counter = 0#keeps track of by how much the current motif position needs to be shifted to the right
         no_more_hyphens = False#goes to True when all indel positions have been processed
         pos_index = 0#keeps track of the motif position that is currently being processed
@@ -553,18 +565,18 @@ def get_aligned_positions(aligned_sequences, positions):
         while pos_index < len(positions):#until all motif positions have been processed
             local_counter = 0#keeps track of the shift due to the current contiguous indel codon block.
             if not no_more_hyphens:#until all indels have been taken into account
-                while hyphens_short[0] <= positions[pos_index]:#if any dashes precede or coincide with the first motif position (unaligned), thus causing a shift
-                    local_counter = local_counter + 3 #update this counter to account for the motif position shifting to the right by three positions
+                while hyphens[0] <= positions[pos_index]:#if any dashes precede or coincide with the first motif position (unaligned), thus causing a shift
+                    local_counter = local_counter + 1 #update this counter to account for the motif position shifting to the right
                     contig_counter = 0#counts the number of contiguous codon indels
-                    if len(hyphens_short) != 1:#if the current indel codon is not the last one
-                        while hyphens_short[contig_counter+1] - hyphens_short[contig_counter] == 3:#if the following hyphen is three bases from the current one (you have two contiguous indel codons)
-                            local_counter = local_counter + 3#update counter to account for the motif position shifting 3 bp downstream
+                    if len(hyphens) != 1:#if the current indel codon is not the last one
+                        while hyphens[contig_counter+1] - hyphens[contig_counter] == 1:#if the following hyphen is next to the current one
+                            local_counter = local_counter + 1#update counter to account for the motif position shifting downstream
                             contig_counter = contig_counter + 1#update counter to show you have another contiguous indel codon
-                            if contig_counter+1 == len(hyphens_short):#if the current indel codon is the last one, break out of the loop to avoid getting an error when it tries to check the next indel codon for contiguity.
+                            if contig_counter+1 == len(hyphens):#if the current indel codon is the last one, break out of the loop to avoid getting an error when it tries to check the next indel codon for contiguity.
                                 break
-                        hyphens_short = np.delete(hyphens_short, range(contig_counter))#once you've either processed all indel codons or the next indel codon is not contiguous to the current one, delete all the indel codons in the current contiguous block.
-                    hyphens_short = np.delete(hyphens_short, 0)#because contig counter gives you the number of contiguous codons - 1 so even if you've deleted 0:contig_counter, you still need to delete one more indel codon.
-                    if len(hyphens_short) < 1:
+                        hyphens = np.delete(hyphens, range(contig_counter))#once you've either processed all indel codons or the next indel codon is not contiguous to the current one, delete all the indel codons in the current contiguous block.
+                    hyphens = np.delete(hyphens, 0)#because contig counter gives you the number of contiguous codons - 1 so even if you've deleted 0:contig_counter, you still need to delete one more indel codon.
+                    if len(hyphens) < 1:
                         no_more_hyphens = True
                         break
             counter = counter + local_counter#add the shift due to the current contiguous block of indel codons (possibly just one codon)
@@ -572,8 +584,8 @@ def get_aligned_positions(aligned_sequences, positions):
                 positions[pos_index] = positions[pos_index] + local_counter
             else:#otherwise shift the motif position by the total shift that has accumulated
                 positions[pos_index] = positions[pos_index] + counter
-            if len(hyphens_short) > 0:#if all indel codons haven't been deleted
-                if hyphens_short[0] <= positions[pos_index]:#if there is another indel codon block in front of or coincident with the current motif position
+            if len(hyphens) > 0:#if all indel codons haven't been deleted
+                if hyphens[0] <= positions[pos_index]:#if there is another indel codon block in front of or coincident with the current motif position
                     repeat = True #go through the loop with the next indel codon block without mocing to the next motif position
                 else:
                     pos_index = pos_index + 1 #move to the next motif position
@@ -584,15 +596,14 @@ def get_aligned_positions(aligned_sequences, positions):
     positions = sorted(list(set(positions)))
 ##    positions = [i for i in positions if i < len(aligned_sequences[0])]#to remove motif positions that overlap with the stop codon
     excess_counter = 0
-    for pos in range(len(positions) - 1, 0, -1):
-        if positions[pos] >= len(aligned_sequences[0]):
+    for pos in range(len(positions) - 1, 0, -3):
+        if positions[pos] >= len(aligned_sequences[0]) or positions[pos - 1] >= len(aligned_sequences[0]) or positions[pos - 2] >= len(aligned_sequences[0]):
             excess_counter = excess_counter + 1
         else:
             break
     for i in range(excess_counter):
-        del positions[-1]
+        del positions[-3:]
     return(positions)
-
 
 def get_LeuArg(sequence, two_or_four):
     '''
@@ -700,44 +711,65 @@ def input_dict_for_dS(correspondances_file_name, alignment_folder_name, fasta_fi
         for pos, name in enumerate(names[0]):
             trans_id = regions_bed[pos][3]
             mapping_to_trans_ids[name] = trans_id
-            mapping_to_gene_ids[name] = [key for key in map_from_regions["gene name dict"] if map_from_regions["gene name dict"][key][0][4] == trans_id][0]
-    correspondances = rw.read_many_fields(correspondances_file_name, ",")
-    correspondance_dict = {}
-    for i in correspondances:
-        correspondance_dict[i[0]] = i[1]
+            mapping_to_gene_ids[name] = [key for key in map_from_regions["gene name dict"] if map_from_regions["gene name dict"][key][0] == trans_id][0]
+    two_seqs = False
+    if "|" in seqs[0]:
+        two_seqs = True
+        names = [i.replace("|", "&") for i in names]
+        names = [i.replace("%", "") for i in names]
+    else:
+        correspondances = rw.read_many_fields(correspondances_file_name, ",")
+        correspondance_dict = {}
+        for i in correspondances:
+            correspondance_dict[i[0]] = i[1]
     if not picked:
         if map_from_regions:
             picked = names[0]
         else:
-            picked = names
+            picked = names.copy()
     with open(output_file_name, "w") as file:
         for idn in picked:
             current_list = [idn]
-            if map_from_regions:
-                orth_idn = correspondance_dict[mapping_to_gene_ids[idn]]
-                if "_" not in orth_idn:
-                    orth_idn = orth_idn + "_0"
-                phy_file_name = "{0}/{1}_{2}.phy".format(alignment_folder_name, mapping_to_gene_ids[idn], orth_idn)
+            if two_seqs:
+                aligned_sequences = seqs[names.index(idn)]
+                current_list.append("{0}_orth".format(idn))
             else:
-                orth_idn = correspondance_dict[idn]
-                if "_" not in orth_idn:
-                    orth_idn = orth_idn + "_0"
-                phy_file_name = "{0}/{1}_{2}.phy".format(alignment_folder_name, idn, orth_idn)
-            current_list.append(orth_idn)
-            aligned_sequences = [str(i.seq) for i in SeqIO.parse(phy_file_name, "phylip-sequential")]
-            aligned_sequences = "|".join(aligned_sequences)
+                if map_from_regions:
+                    orth_idn = correspondance_dict[mapping_to_gene_ids[idn]]
+                    if "_" not in orth_idn:
+                        orth_idn = orth_idn + "_0"
+                    phy_file_name = "{0}/{1}_{2}.phy".format(alignment_folder_name, mapping_to_gene_ids[idn], orth_idn)
+                else:
+                    orth_idn = correspondance_dict[idn]
+                    if "_" not in orth_idn:
+                        orth_idn = orth_idn + "_0"
+                    phy_file_name = "{0}/{1}_{2}.phy".format(alignment_folder_name, idn, orth_idn)
+                current_list.append(orth_idn)
+                try:
+                    aligned_sequences = [str(i.seq) for i in SeqIO.parse(phy_file_name, "phylip-sequential")]
+                except FileNotFoundError:
+                    phy_file_name = phy_file_name[:-6] + ".phy"
+                    current_list[-1] = current_list[-1][:-2]
+                    aligned_sequences = [str(i.seq) for i in SeqIO.parse(phy_file_name, "phylip-sequential")]
+                aligned_sequences = "|".join(aligned_sequences)
             current_list.append(aligned_sequences)
             #it's called "full_CDS" here but if the fasta file contains regions, it'll actually be a region (flank/core etc.)
-            if not map_from_regions:
-                full_CDS = seqs[names.index(idn)]
-                #where are the positions of the first bases of twofold/fourfold Leucine/Arginine codons?
-                two_fold = ",".join([str(i) for i in get_LeuArg(list(full_CDS), 2)])
-                four_fold = ",".join([str(i) for i in get_LeuArg(list(full_CDS), 4)])
+            if two_seqs:
+                temp = aligned_sequences.split("|")
+                full_CDS = "".join([i for i in temp[0] if i in nc._canon_bases_])
+                two_fold = "NA"
+                four_fold = "NA"
             else:
-                full_CDS = [seq[names[0].index(idn)] for seq in seqs]
-                two_fold = "|".join([",".join([str(i) for i in get_LeuArg(list(seqs), 2)]) for seq in full_CDS])
-                four_fold = "|".join([",".join([str(i) for i in get_LeuArg(list(seqs), 4)]) for seq in full_CDS])
-                full_CDS = "|".join(full_CDS)                   
+                if not map_from_regions:
+                    full_CDS = seqs[names.index(idn)]
+                    #where are the positions of the first bases of twofold/fourfold Leucine/Arginine codons?
+                    two_fold = ",".join([str(i) for i in get_LeuArg(list(full_CDS), 2)])
+                    four_fold = ",".join([str(i) for i in get_LeuArg(list(full_CDS), 4)])
+                else:
+                    full_CDS = [seq[names[0].index(idn)] for seq in seqs]
+                    two_fold = "|".join([",".join([str(i) for i in get_LeuArg(list(seqs), 2)]) for seq in full_CDS])
+                    four_fold = "|".join([",".join([str(i) for i in get_LeuArg(list(seqs), 4)]) for seq in full_CDS])
+                    full_CDS = "|".join(full_CDS)                   
             current_list.append(full_CDS)
             current_list.append(two_fold)
             current_list.append(four_fold)
@@ -766,7 +798,7 @@ def input_dict_for_dS(correspondances_file_name, alignment_folder_name, fasta_fi
 
 def keep_conserved_pc(trans_id, orth_ids, CDS, orth_CDS, dS_threshold, alignments_folder_name):
     '''
-    Given a CDS, check whether it has an ortholog in the other species to which it aligns with dS below dS_threshold and omega below 0.5 (though it doesn't have to the same ortholog for
+    Given a CDS, check whether it has an ortholog in the other species to which it aligns with dS below dS_threshold and omega below 0.5 (though it doesn't have to be the same ortholog for
     the two conditions).
     '''
     
@@ -805,9 +837,7 @@ def keep_conserved_pc(trans_id, orth_ids, CDS, orth_CDS, dS_threshold, alignment
         aligned_sequences[0] = get_aligned_nt_sequence_from_prot(CDS, aligned_prot_sequences[0])
         aligned_sequences[1] = get_aligned_nt_sequence_from_prot(orth_CDS[i], aligned_prot_sequences[1])
         aligned_sequences_IUPAC = [Seq("".join(j),IUPAC.unambiguous_dna) for j in aligned_sequences]
-        #remove the stop or PAML will not be happy
-        aligned_sequences_IUPAC = [j[:-3] for j in aligned_sequences_IUPAC]
-        #wirte the nucleotide alignemnt to a phylip file
+        #write the nucleotide alignment to a phylip file
         alignment = MultipleSeqAlignment([SeqRecord(aligned_sequences_IUPAC[0], id = "seq1"),SeqRecord(aligned_sequences_IUPAC[1], id = "seq2")])
         phy_file_name = "{0}/{1}_{2}.phy".format(alignments_folder_name, trans_id, orth_ids[i])
         AlignIO.write(alignment, phy_file_name,"phylip-sequential")
@@ -831,7 +861,7 @@ def keep_conserved_pc(trans_id, orth_ids, CDS, orth_CDS, dS_threshold, alignment
         best_match = orth_ids[dS.index(min_dS)]
         return(True, best_match)
 
-def map_regions_to_CDS(fasta, bed, fs, gene_name_dict, CDS):
+def map_regions_to_CDS(fasta, bed, fs, transcripts, CDS):
     '''
     Given a fasta file, a bed file and a set of CDS coordinates, return for each record the relative coordinates to which
     the bed record maps in the corresponding full CDS.
@@ -842,7 +872,7 @@ def map_regions_to_CDS(fasta, bed, fs, gene_name_dict, CDS):
     for pos, name in enumerate(names):
         mapping_to_gene_ids[name] = {}
         trans_id = regions_bed[pos][3]
-        gene_id = fs.convert_between_ENST_and_ENSG(trans_id, gene_name_dict, "ENSG")
+        gene_id = fs.convert_between_ENST_and_ENSG(trans_id, transcripts, "ENSG")
         mapping_to_gene_ids[name]["idn"] = gene_id
         current_record = regions_bed[pos]
         current_flank_indices_in_CDS = bed_to_CDS_indices(current_record, CDS[trans_id])
@@ -974,8 +1004,12 @@ def parse_input_dict_line(line):
             output_dict["flank indices in CDS"][pos] = [int(i) for i in region.split(",")]
     else:
         output_dict["full CDS"] = line[3]
-        output_dict["two-fold"] = [int(i) for i in line[4].split(",") if len(i) > 0]
-        output_dict["four-fold"] = [int(i) for i in line[5].split(",") if len(i) > 0]        
+        if line[4] != "NA":
+            output_dict["two-fold"] = [int(i) for i in line[4].split(",") if len(i) > 0]
+            output_dict["four-fold"] = [int(i) for i in line[5].split(",") if len(i) > 0]
+        else:
+            output_dict["two-fold"] = "NA"
+            output_dict["four-fold"] = "NA"
     return(idn, output_dict)
         
 
@@ -995,7 +1029,7 @@ def remove_stops(temp_human, temp_macaque):
     temp_macaque = [temp_macaque[i] for i in range(len(temp_macaque)) if i not in to_delete]
     return(temp_human,temp_macaque)
 
-def run_codeml(cml_input, cml_output, ctl_file = None, method = None, id1 = None, id2 = None):
+def run_codeml(cml_input, cml_output, ctl_file = None, method = None, id1 = None, id2 = None, model = None):
     '''
     Run PAML codeml/yn00 on an alignment.
     '''
@@ -1014,6 +1048,7 @@ def run_codeml(cml_input, cml_output, ctl_file = None, method = None, id1 = None
         ds = temp_dict["NSsites"][0]["parameters"]["dS"]
         dn = temp_dict["NSsites"][0]["parameters"]["dN"]
         omega = temp_dict["NSsites"][0]["parameters"]["omega"]
+        tree_length = None
     elif method == "yn":
         #if you want to use the Yang and Nielsen method (faster but less accurate)
         if not id1:
@@ -1021,25 +1056,41 @@ def run_codeml(cml_input, cml_output, ctl_file = None, method = None, id1 = None
         if not id2:
             id2 = "orth_id"
         cmd_name = "yn00"
-        cml = yn00.Yn00(alignment = cml_input, out_file = cml_output)
+        yn = yn00.Yn00(alignment = cml_input, out_file = cml_output)
         if ctl_file:
-            cml.ctl_file = ctl_file
+            yn.ctl_file = ctl_file
         try:
-            temp_dict = cml.run(command = cmd_name)
+            temp_dict = yn.run(command = cmd_name)
             ds = temp_dict[id2][id1]["YN00"]["dS"]
             dn = temp_dict[id2][id1]["YN00"]["dN"]
             omega = temp_dict[id2][id1]["YN00"]["omega"]
+            tree_length = None
         except IndexError:
             #this is because the BioPython script that parses the yn00 output
-            #excepts floats but if there aren't enough synonymous sites
+            #expects floats but if there aren't enough synonymous sites
             #(at least that's the way I interpret it, not quite sure though)
             #dN and dS will be nans and you'll get an IndexError
             ds = None
             omega = None
             dn = None
+            tree_length = None
+    elif method == "baseml":
+        bml_tree = "general/human_macaque.tree"
+        cmd_name = "baseml"
+        bml = baseml.Baseml(alignment = cml_input, out_file = cml_output, tree = bml_tree)
+        if not model:
+            model = 1
+        bml.set_options(verbose = 1, runmode = 0, model = model)
+        if ctl_file:
+            bml.ctl_file = ctl_file
+        temp_dict = bml.run(command = cmd_name)
+        tree_length = temp_dict["tree length"]
+        ds = None
+        dn = None
+        omega = None
     else:
         print("{0} is not a valid method.".format(method))
-    return({"dS": ds, "dN": dn, "omega": omega})
+    return({"dS": ds, "dN": dn, "omega": omega, "tree length": tree_length})
 
 def tabix(bed_file, output_file):
     '''

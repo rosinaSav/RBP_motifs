@@ -7,8 +7,8 @@ import read_and_write as rw
 def main():
 
     description = "Calculate the combined density of a set of motif sets."
-    args = parse_arguments(description, ["motifs_file_name", "summary_file_name", "dataset_name", "output_folder_name", "output_file_name", "n_sim", "features_file_name", "genome", "families_file_name", "fasta_name", "ND_column", "seed", "output_suffix", "negative_ND", "new_filters", "upper_quarter", "lower_quarter", "full_set", "newer_filters"], ints = [5, 10, 11], flags = [13, 14, 15, 16, 17, 18])
-    [motifs_file_name, summary_file_name, dataset_name, output_folder_name, output_file_name, n_sim, features_file_name, genome, families_file_name, fasta_name, ND_column, seed, output_suffix, negative_ND, new_filters, upper_quarter, lower_quarter, full_set, newer_filters] = [args.motifs_file_name, args.summary_file_name, args.dataset_name, args.output_folder_name, args.output_file_name, args.n_sim, args.features_file_name, args.genome, args.families_file_name, args.fasta_name, args.ND_column, args.seed, args.output_suffix, args.negative_ND, args.new_filters, args.upper_quarter, args.lower_quarter, args.full_set, args.newer_filters]
+    args = parse_arguments(description, ["motifs_file_name", "summary_file_name", "dataset_name", "output_folder_name", "output_file_name", "n_sim", "features_file_name", "genome", "families_file_name", "fasta_name", "ND_column", "seed", "output_suffix", "negative_ND", "new_filters", "upper_quarter", "lower_quarter", "full_set", "newer_filters", "two_seqs"], ints = [5, 10, 11], flags = [13, 14, 15, 16, 17, 18, 19])
+    [motifs_file_name, summary_file_name, dataset_name, output_folder_name, output_file_name, n_sim, features_file_name, genome, families_file_name, fasta_name, ND_column, seed, output_suffix, negative_ND, new_filters, upper_quarter, lower_quarter, full_set, newer_filters, two_seqs] = [args.motifs_file_name, args.summary_file_name, args.dataset_name, args.output_folder_name, args.output_file_name, args.n_sim, args.features_file_name, args.genome, args.families_file_name, args.fasta_name, args.ND_column, args.seed, args.output_suffix, args.negative_ND, args.new_filters, args.upper_quarter, args.lower_quarter, args.full_set, args.newer_filters, args.two_seqs]
 
     #make a dictionary with RBPs as keys and ND/p values as values.
     if summary_file_name != "None":
@@ -74,7 +74,7 @@ def main():
                                                    "{0}/overall_sim_density_{1}.csv".format(output_folder_name, output_suffix),
                                                    "{0}/overall_positions.csv_{1}".format(output_folder_name, output_suffix),
                                                    "{0}/overall_sim_positions_{1}".format(output_folder_name, output_suffix),
-                                                   concat = False, positions = False, feature_set = fs, verbose = True)
+                                                   concat = False, positions = False, feature_set = fs, verbose = True, two_seqs = two_seqs)
         record = [str(output_dict["median density"]), str(np.mean(output_dict["simulated densities"])), str(output_dict["median ND"]), str(output_dict["effective p"]), str(output_dict["Z"]), str(output_dict["depletion p"]), str(len(motifs)), str(output_dict["simulant sd"])]
         #write to output file
         output_file.write("\t".join(record))
