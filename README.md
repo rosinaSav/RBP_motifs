@@ -1,6 +1,9 @@
-Source code for paper on RBP motifs. housekeeping.py, nucleotide_comp.py, plotting.py, read_and_write.py, 
-cython_func.pyx, my_stats.py, bedtools_games.py, ensembl_ops.py and conservation.py are modules and not all of the code
-that they contain is relevant to the paper. 
+***DISCLAIMER***
+The code in this repository has not been packaged to be run out of the box. For instance, there are many software dependencies that haven't been explicitly documented, and the documentation regarding how to run the scripts is also insufficiently documented for external use. The purpose of the repository is to serve as an explicit record of the analyses performed in the paper. It is thus primarily a supplement to the methods. However, if anybody did wish to reuse any of the code and was having issues or questions, please do contact me (rosinasavisaar@gamil.com) and we'll get it to work.
+****************
+
+Source code for the Savisaar and Hurst 2016 Molecular Biology and Evolution paper. housekeeping.py, nucleotide_comp.py, plotting.py, read_and_write.py, 
+cython_func.pyx, my_stats.py, bedtools_games.py, ensembl_ops.py and conservation.py are custom modules that I've written for my personal use and not all of the code that they contain is relevant to the paper. 
 The R scripts are necessary for the module my_stats.py. 
 The perl script are necessary for the module ensembl_ops.py.
 
