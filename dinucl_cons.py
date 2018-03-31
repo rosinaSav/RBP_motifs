@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Calculate the conservation of a set of motifs separately for each dinucleotide.
+'''
+
 from bedtools_games import Feature_Set
 import conservation
 from housekeeping import flatten, make_dir, parse_arguments

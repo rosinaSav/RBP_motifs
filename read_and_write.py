@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Module containing functions for reading and writing data.
+'''
+
 import csv
 from housekeeping import flatten, print_elements
 import os

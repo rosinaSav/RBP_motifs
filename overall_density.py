@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Calculate the combined density of a set of motif sets.
+'''
+
 from bedtools_games import Feature_Set
 from housekeeping import flatten, list_to_dict, make_dir, parse_arguments
 import nucleotide_comp as nc

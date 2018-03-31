@@ -1,3 +1,9 @@
+'''
+Author: Rosina Savisaar.
+Replace true RBP target motifs with a simulant set
+that preserves certain properties of the original set (depending on options).
+'''
+
 from housekeeping import flatten
 import nucleotide_comp as nc
 import read_and_write as rw

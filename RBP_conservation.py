@@ -1,3 +1,9 @@
+'''
+Author: Rosina Savisaar.
+Determine the synonymous rate of evolution (dS) of RBP target motif occurrences in a set of exons.
+Also generate an empirical distribution of dS values for simulant motifs.
+'''
+
 import argparse
 from bedtools_games import Feature_Set
 import conservation
@@ -9,6 +15,9 @@ import read_and_write as rw
 import time
 
 def do_dS_calc(protein_names, RBP_dict, uf_fasta, df_fasta, c_fasta, n_sim, output_folder_name, correspondances_file_name, alignment_folder_name, output_file_name, regions_dict, markov, new_filters, goldman_yang):
+    '''
+    The core of the script that does the actual conservation calculations. 
+    '''
     with open(output_file_name, "w") as file:
         #write the header of the output file
         file.write(",".join(["protein_name", "motif_number", "upstream_ds", "norm_upstream_ds", "upstream_p", "core_ds", "norm_core_ds", "core_p", "downstream_ds", "norm_downstream_ds", "downstream_p"]))

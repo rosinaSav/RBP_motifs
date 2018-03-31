@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Compile a set of motifs putatively recognized by RNA-binding proteins.
+'''
+
 from housekeeping import flatten, list_to_dict, overlap, parse_arguments, print_elements
 import matplotlib.pyplot as plt
 import nucleotide_comp as nc

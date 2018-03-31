@@ -1,3 +1,9 @@
+'''
+Author: Rosina Savisaar.
+Module containing functions that have to do with
+nucleotide composition, k-mer frquencies etc.
+'''
+
 from Bio.SeqUtils.CodonUsage import SynonymousCodons as _genetic_code_
 import csv
 from cython_func import calc_density_c, calc_density_for_concat_c, calc_density_for_concat_several_c
@@ -80,9 +86,11 @@ def calc_nt_freqs_sequence(fasta, order):
     '''
     Calculate the order-mer frequencies of a set of sequences.
     '''
+    #generate all possible kmers of the relevant order
     kmers = generate_all_kmers(order)
     names, seqs = rw.read_fasta(fasta)
     print(fasta)
+    #prepare output dictionary
     output = {i: {} for i in names}
     for name in names:
         for kmer in kmers:
@@ -90,9 +98,11 @@ def calc_nt_freqs_sequence(fasta, order):
     for pos, seq in enumerate(seqs):
         if pos % 1000 == 0:
             print(pos)
+        #make sure the sequence is all upper case!
         seq = seq.upper()
         current_name = names[pos]
         total = 0
+        #loop over the sequence and update the relevant kmer counters
         for index in range(len(seq)):
             try:
                 current_kmer = seq[index: index + order]
@@ -101,6 +111,7 @@ def calc_nt_freqs_sequence(fasta, order):
                     total = total + 1
             except IndexError:
                 pass
+        #turn counts into frequencies
         if total > 0:
             output[current_name] = {i: output[current_name][i]/total for i in kmers}
     return(output)

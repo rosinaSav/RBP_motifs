@@ -1,3 +1,7 @@
+'''
+Author: Rosina Savisaar.
+Module containing functions relevant to evolutionary conservation and population diversity.
+'''
 import csv
 import re
 import os
@@ -365,6 +369,8 @@ def extend_family(blast_results, families, query):
 def fill_codons(motif_positions, two_fold, four_fold):
     '''
     Given a list of  motif hit positions, transform it to give a list of full codons.
+    NB! This works either if you have blocks of contiguous bases (i.e. full motif hits) or fourfold degenerate positions, that is to say, there are never two adjacent positions.
+    Anything else and this function will produce nonsense.
     '''
     motif_positions = [int(i) for i in motif_positions]
     positions_number = len(motif_positions)

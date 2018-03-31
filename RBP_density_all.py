@@ -1,3 +1,9 @@
+'''
+Author: Rosina Savisaar.
+Determine the density of RBP target motif occurrences in a set of CDSs.
+Also generate an empirical distribution of densities for simulant motifs.
+'''
+
 import argparse
 from bedtools_games import Feature_Set
 from housekeeping import make_dir

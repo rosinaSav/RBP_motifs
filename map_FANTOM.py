@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Take an output file from prepare_FANTOM.py and make a file with the expression data for each gene.
+'''
+
 from bedtools_games import Feature_Set, intersect_bed
 from housekeeping import list_to_dict, parse_arguments, print_elements
 import numpy as np

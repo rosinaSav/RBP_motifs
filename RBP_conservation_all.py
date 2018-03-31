@@ -1,3 +1,9 @@
+'''
+Author: Rosina Savisaar.
+Determine the synonymous rate of evolution (dS) of RBP target motif occurrences in a set of full CDSs.
+Also generate an empirical distribution of dS values for simulant motifs.
+'''
+
 import argparse
 from bedtools_games import Feature_Set
 import conservation

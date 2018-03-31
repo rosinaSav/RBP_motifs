@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Check whether a set of motifs has enough information (= the density is high enough) for it to be included in subsequent analysis.
+'''
+
 from bedtools_games import Feature_Set
 from housekeeping import list_to_dict, parse_arguments, print_elements
 import nucleotide_comp as nc

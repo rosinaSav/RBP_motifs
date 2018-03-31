@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Write UTR and intron sequences to file (aligments to macaque).
+'''
+
 from bedtools_games import bed_from_coords, coords_from_bed, Feature_Set
 import ensembl_ops as eo
 from housekeeping import flatten, parse_arguments, remove_file, run_process

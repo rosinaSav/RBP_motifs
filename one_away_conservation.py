@@ -1,3 +1,9 @@
+'''
+Author: Rosina Savisaar.
+Calculate the conservation of k-mers that are a single point mutation away
+from being part of a set of motifs.
+'''
+
 from bedtools_games import Feature_Set
 from Bio import SeqIO
 import conservation

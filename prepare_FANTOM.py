@@ -1,3 +1,10 @@
+'''
+Author: Rosina Savisaar.
+Filter an osc file to only contain the
+samples that you want and format it as a bed file so that
+you could lift over the coordinates.
+'''
+
 from housekeeping import parse_arguments
 import re
 

@@ -1,7 +1,13 @@
+'''
+Author: Rosina Savisaar.
+Contains functions and classes for operations on sequence coordinates.
+Many functions wrap bedtools or bedops, others are all Python.
+'''
+
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
 import csv
-##from goatools import obo_parser
+from goatools import obo_parser
 from housekeeping import flatten, print_elements, make_dir, remove_file, run_process
 import itertools
 import multiprocessing as mp
@@ -21,17 +27,34 @@ import time
 
 class Feature_Set(object):
 
-    def __init__(self,input_file, genome):
+    '''
+    An instance of a Feature_Set object corresponds to a particular genome sequence
+    and associated annotations. One can define a dataset (a particular set
+    of transcript isoforms) and perform operations on that dataset.
+    '''
+
+    def __init__(self, input_file, genome):
+        '''
+        Initiate a Feature_Set.
+        The input file should be an Ensembl GTF.
+        Genomes: hg38, hg37, mm10.
+        '''
         self.features_file_name = input_file
         self.current_dir = os.getcwd()
-        self.features_file_name_full = "{0}/{1}".format(self.current_dir,input_file)
+        self.features_file_name_full = "{0}/{1}".format(self.current_dir, input_file)
         self.gene_pattern = re.compile("ENS\w*G\d+")
         self.transcript_pattern = re.compile("ENS\w*T\d+")
         self.genome = genome
         self.gene_name_pattern = re.compile("(?<=gene_name \")[\w\d\-\.\(\)\/]*(?=\")")
 
-    def add_dataset(self,new_dataset_name,new_features_file_name,new_input_list = None, force_new = False):
+    def add_dataset(self, new_dataset_name, new_features_file_name, new_input_list = None, force_new = False):
+        '''
+        Read in a new dataset and merge it with the current dataset.
+        '''
         temp_fs = Feature_Set(new_features_file_name, self.genome)
+        # unless if force_new is True,
+        # check if the new dataset has already been stored
+        # only create it anew if it hasn't been
         if force_new:
             temp_fs.create_dataset(new_dataset_name,input_list = new_input_list)
         else:
@@ -46,25 +69,37 @@ class Feature_Set(object):
         print("The data from the dataset {0} has been added to the current dataset.".format(new_dataset_name))
 
     def add_families(self, families):
+        '''
+        Read in information on paralogous families. If families information is already associated to the current dataset,
+        merge the old and new sets of family information.
+        '''
+        #to make sure that in case of merging, the new family IDs don't overwrite the old ones.
         try:
             current_max = len(self.families.keys())
         except AttributeError:
             current_max = 0
             self.families = {}
-        for i in range(len(families)):
-            self.families[i+current_max] = families[i]
+        for family in range(len(families)):
+            self.families[family + current_max] = families[family]
 
     def alternative_splicing(self, gene_name_dict, CDS):
+        '''
+        For all the transcripts in the dataset, determine whether the gene that they are associated to is alternatively spliced
+        (according to Ensembl transcript isoforms).
+        '''
         results = {}
+        #loop over genes
         for name in gene_name_dict:
             previous_coords = []
             found = False
             alt = False
+            #loop over transcript isoforms
             for trans in gene_name_dict[name]:
                 current_CDS = CDS[trans[4]]
                 current_CDS
                 if current_CDS:
                     found = True
+                    #feature start and end coordinates
                     current_coords = [(i[0][2], i[0][3]) for i in current_CDS]
                     if previous_coords:
                         if current_coords != previous_coords:
@@ -80,12 +115,23 @@ class Feature_Set(object):
         return(results)
 
     def average_over_families(self, input_dict, remove_empty = False):
+        '''
+        Given a dictionary with transcrpt identifiers as keys and ints/floats
+        as values, take the mean of the values within each family and replace the
+        individual members with a single element for the family. Don't modify elements where
+        the transcript is not in a family.
+        remove_empty: don't report families if none of the members appear in the input dictionary
+        '''
         try:
+            #make a flat version of the families and move all elements that don't
+            #belong to families to new output dictionary
             flat_families = flatten(self.families.values())
             output_dict = {}
             for i in input_dict:
                 if i not in flat_families:
                     output_dict[i] = input_dict[i]
+            #for each family, grab the associated elements, average the values
+            #and move to output dictionary
             for i in range(len(self.families)):
                 family_name = "Family{0}".format(i)
                 family_values = []
@@ -106,7 +152,14 @@ class Feature_Set(object):
             print("No families associated to dataset!")
             raise AttributeError
 
-    def average_over_families_2d(self,input_dict, remove_nans = False, nan_for_None = False, require_a_member = True, remove_empty = False):
+    def average_over_families_2d(self, input_dict, remove_nans = False, nan_for_None = False, require_a_member = True, remove_empty = False):
+        '''
+        Similar to average_over_families but the values in the input dictionaries are lists rather than scalars.
+        remove_nans: ignore nans when averaging within a family
+        nan_for_None: if not remove_empty and no values are present for a given family, report the family
+        value as nan rather than None
+        require_a_member: crash if no family members are present (because that is suspicious)
+        '''
         try:
             flat_families = flatten(self.families.values())
             output_dict = {}
@@ -127,6 +180,7 @@ class Feature_Set(object):
                 if family_values:
                     found_something = True
                     family_values = np.array(family_values)
+                    #take a column mean
                     if not remove_nans:
                         output_dict[family_name] = np.mean(family_values, axis = 0)
                     else:
@@ -148,6 +202,12 @@ class Feature_Set(object):
             raise AttributeError
        
     def bin_values(self, values_dict, bin_number, labels):
+        '''
+        Given a dictionary of key-value pairs, divide the values into
+        bin_number bins, labelling the bins with labels.
+        Return 1) a dictionary that tells you which keys belong to which bins
+        2) information on bin boundaries from pandas
+        '''
         values = [[key, value] for key, value in values_dict.items()]
         names = [i[0] for i in values]
         values = [i[1] for i in values]
@@ -161,6 +221,9 @@ class Feature_Set(object):
         return(output_dict, bins)
 
     def convert_between_ENST_and_ENSG(self, identifier, gene_name_dict, dest, families = False):
+        '''
+        Convert between gene and transcript identifiers.
+        '''
         #if destination is ENST, expect a gene_name_dict, otherwise expects transcripts
         if families:
             if identifier[:6] == "Family":
@@ -185,6 +248,9 @@ class Feature_Set(object):
             raise Exception             
 
     def convert_families_to_ENST(self, families, transcripts):
+        '''
+        Given a set of families specified using gene identifiers, convert them to gene identifiers.
+        '''
         #list of ENST identifiers
         keys_list = list(transcripts.keys())
         found_counter = 0
@@ -247,9 +313,14 @@ class Feature_Set(object):
         raise Exception
 
     def create_dataset(self, dataset_name, split_size = 100 * 1024 * 1024, input_list = None, filter_trans = True, input_type = None):
+        '''
+        Given a list of transcript identifiers in input_list, read in relevant genome features.
+        '''
+        #if you set input_type to "gene", it'll expect gene identifiers in the input_list and get all corresponding transcripts
         if input_type == None:
             input_type = "transcript"
         #I stole the outline of this chunk of code from http://aamirhussain.com/2013/10/02/parsing-large-csv-files-in-python/
+        #the aim is to parallelize the reading in of a large csv so it wouldn't be as painfully slow
         if filter_trans:
             if input_list:
                 self.names = input_list
@@ -311,7 +382,69 @@ class Feature_Set(object):
         self.dataset_components = [self.dataset for i in self.names]
         print("Created dataset {0}.".format(dataset_name))
 
+    def distance_to_nearest_junction(self, CDS, exons, stop_codons, position, sequence = None, verbose = False):
+        '''
+        Given a position in the CDS, return the distance to the nearest splice junction.
+        If the CDS sequence is given, pick all the positions in the CDS that have the same
+        nucleotide, calculate their distance to the nearest junction and use the resulting
+        empirical distribtuion to calculate an empirical p-value.
+        '''
+        #this is just to make it compatible with the format of a CDS feature
+        if stop_codons:
+            stop_codons = [[i, 0] for i in stop_codons]
+        CDS.extend(stop_codons)
+        if CDS[0][0][7] == "-":
+            CDS.reverse()
+        #in a separate function so you could use the same function in the simulations
+        min_dist = self.distance_to_nearest_junction_core(CDS, exons, position, verbose = verbose)
+        if not sequence:
+            return(min_dist)
+        #all the positions that have the same nucleotide but are not the focal position itself
+        base_pos = [pos for pos, i in enumerate(sequence) if (i == sequence[position]) and (pos != position)]
+        #get simulant distances
+        sim_dists = []
+        for sim_pos in base_pos:
+            current_sim_dist = self.distance_to_nearest_junction_core(CDS, exons, sim_pos, verbose = False)
+            sim_dists.append(current_sim_dist)
+        #get p-value
+        p = ms.calc_eff_p(min_dist, sim_dists, greater = False)
+        return(min_dist, p)
+    
+    def distance_to_nearest_junction_core(self, CDS, exons, position, verbose = False):
+        '''
+        Core for distance_to_nearest_junction.
+        '''
+        position = self.convert_to_absolute_coordinates([i[0] for i in CDS], position)
+        for pos, exon in enumerate(exons):
+            #if position is within the current exon
+            if (position >= exon[2]) and (position <= exon[3]):
+                #get distance to either flanking exon-exon junction and return the distance
+                #that is smaller
+                dist = [position - exon[2], exon[3] - position]
+                if pos == 0:
+                    return(dist[1])
+                elif pos == (len(exons) - 1):
+                    return(dist[0])
+                return(min(dist))
+        print("Can't match to junction!")
+        raise Exception
+
+    def distance_to_TSS(self, CDS, transcripts):
+        '''
+        For a set of trannscripts, calculate distance between ATG and TSS.
+        '''
+        distance_dict = {}
+        for name in self.names:
+            if transcripts[name][6] == "+":
+                distance_dict[name] = CDS[name][0][0][2] - transcripts[name][2]
+            elif transcripts[name][6] == "-":
+                distance_dict[name] = transcripts[name][3] - CDS[name][0][0][3]
+        return(distance_dict)
+
     def get_CDS(self):
+        '''
+        Parse all CDS features relevant to your data set.
+        '''
         CDS_dict = {}
         stop_codon_dict = self.get_stop_codons()
         for i in self.names:
@@ -322,19 +455,27 @@ class Feature_Set(object):
         for i in CDS_dict:
             if CDS_dict[i]:
                 current_stop_coords = stop_codon_dict[i]
-                current_stop_coords_loc_only = [[j[2],j[3]] for j in current_stop_coords]
-                CDS_dict[i] = [j for j in CDS_dict[i] if [j[2],j[3]] not in current_stop_coords_loc_only]               
+                current_stop_coords_loc_only = [[j[2], j[3]] for j in current_stop_coords]
+                #this is necessary because if a stop is interrupted by an intron, Ensembl records the first part of the stop both
+                #as a CDS feature and as a stop feature
+                CDS_dict[i] = [j for j in CDS_dict[i] if [j[2], j[3]] not in current_stop_coords_loc_only]
+                #sort exons. Do it in reverse for the antisense strand.
                 if CDS_dict[i][0][6] == "+":
-                    CDS_dict[i] = sort_coords(CDS_dict[i],2)
+                    CDS_dict[i] = sort_coords(CDS_dict[i], 2)
                 elif CDS_dict[i][0][6] == "-":
-                    CDS_dict[i] = sort_coords(CDS_dict[i],3, reverse = True)                   
+                    CDS_dict[i] = sort_coords(CDS_dict[i], 3, reverse = True)
+                #+1 because the coordinates are in base-1
                 lengths = [j[3] - j[2] + 1 for j in CDS_dict[i]]
+                #determine the phase of each exon
                 cumul_lengths = [sum(lengths[0:j]) for j in range(0,len(CDS_dict[i]))]
                 phases = [j%3 for j in cumul_lengths]
                 CDS_dict[i] = [[CDS_dict[i][j], phases[j]] for j in range(len(phases))]
         return(CDS_dict)
 
     def get_CDS_gene_ratio(self, CDS, transcripts, UTRs):
+        '''
+        For a set of transcripts, calculate the ratio of coding sequence to total transcript length (without UTRs).
+        '''
         ratios = {}
         CDS_lengths = self.get_lengths(CDS, CDS = True)
         transcript_lengths = self.get_lengths(transcripts, CDS = False)
@@ -344,6 +485,7 @@ class Feature_Set(object):
             else:
                 current_CDS_length = CDS_lengths[trans]
                 current_transcript_length = transcript_lengths[trans]
+                #calculate UTR lengths so you could subtract them from the total transcript length
                 if trans in UTRs:
                     sum_utr = sum([i[3] - i[2] + 1 for i in UTRs[trans][5]])
                     sum_utr = sum_utr + sum([i[3] - i[2] + 1 for i in UTRs[trans][3]])
@@ -360,61 +502,21 @@ class Feature_Set(object):
         for name in gene_name_dict:
             all_trans = [CDS[i[4]] for i in gene_name_dict[name] if len(CDS[i[4]]) > 0]
             flat_exons = flatten(all_trans)
+            #the coordinates of all the exons in any of the transcripts
             flat_exon_coords = [(i[0][0], i[0][2], i[0][3]) for i in flat_exons]
             trans_number = len(all_trans)
+            #only keep exons whose number in the flat list of exon coordinates is the same
+            #as the transcript number (meaning they occur once in every transcript)
             const_exons = [flat_exons[i] for i in range(len(flat_exons)) if flat_exon_coords.count(flat_exon_coords[i]) == trans_number]
             for trans in gene_name_dict[name]:
                 current_trans = trans[4]
                 results[current_trans] = [i for i in CDS[current_trans] if i in const_exons]
         return(results)
-
-    def distance_to_nearest_junction(self, CDS, exons, stop_codons, position, sequence = None, verbose = False):
-        '''
-        Given a position in the CDS, return the distance to the nearest splice junction.
-        '''
-        #this is just to make it compatible with the format of a CDS feature
-        if stop_codons:
-            stop_codons = [[i, 0] for i in stop_codons]
-        CDS.extend(stop_codons)
-        if CDS[0][0][7] == "-":
-            CDS.reverse()
-        min_dist = self.distance_to_nearest_junction_core(CDS, exons, position, verbose = verbose)
-        if not sequence:
-            return(min_dist)
-        base_pos = [pos for pos, i in enumerate(sequence) if (i == sequence[position]) and (pos != position)]
-        sim_dists = []
-        for sim_pos in base_pos:
-            current_sim_dist = self.distance_to_nearest_junction_core(CDS, exons, sim_pos, verbose = False)
-            sim_dists.append(current_sim_dist)
-        p = ms.calc_eff_p(min_dist, sim_dists, greater = False)
-        return(min_dist, p)
-    
-    def distance_to_nearest_junction_core(self, CDS, exons, position, verbose = False):
-        '''
-        Core for distance_to_nearest_junction.
-        '''
-        position = self.convert_to_absolute_coordinates([i[0] for i in CDS], position)
-        for pos, exon in enumerate(exons):
-            if (position >= exon[2]) and (position <= exon[3]):
-                dist = [position - exon[2], exon[3] - position]
-                if pos == 0:
-                    return(dist[1])
-                elif pos == (len(exons) - 1):
-                    return(dist[0])
-                return(min(dist))
-        print("Can't match to junction!")
-        raise Exception
-
-    def distance_to_TSS(self, CDS, transcripts):
-        distance_dict = {}
-        for name in self.names:
-            if transcripts[name][6] == "+":
-                distance_dict[name] = CDS[name][0][0][2] - transcripts[name][2]
-            elif transcripts[name][6] == "-":
-                distance_dict[name] = transcripts[name][3] - CDS[name][0][0][3]
-        return(distance_dict)
         
     def get_exon_cores_and_flanks(self, exons, CDS, file_prefix = None, write_to_fasta = False):
+        '''
+        Get the 5' most and 3' most 69 bp of each exon.
+        '''
         #filter out genes with fewer than three exons
         ids_to_keep = []
         for i in exons:
@@ -444,7 +546,7 @@ class Feature_Set(object):
                 CDS[i] = [trim_sequence_coords(j[0], j[1]) for j in CDS[i]]
                 if CDS[i]:
                     if CDS[i][0][6] == "+":
-                        #also tranform to BED
+                        #also transform to BED
                         uf_records = [[j[0], j[2] - 1, j[2] + 69 - 1, j[4], "100", j[6]] for j in CDS[i]]
                         df_records = [[j[0], j[3] - 69, j[3], j[4], "100", j[6]] for j in CDS[i]]
                         remainder = [(df_records[j][1] - uf_records[j][2] - 69)/2 for j in range(len(CDS[i]))]
@@ -470,6 +572,9 @@ class Feature_Set(object):
                 fasta_from_intervals("{0}_c.bed".format(file_prefix), "{0}_c.fasta".format(file_prefix), self.genome, force_strand = True)
 
     def get_exons_coding(self, exons, CDS):
+        '''
+        Given a set of exons, only leave ones that are fully coding.
+        '''
         #filter out genes with fewer than three exons
         ids_to_keep = []
         for i in exons:
@@ -497,6 +602,9 @@ class Feature_Set(object):
         return(to_keep)
 
     def get_exon_numbers(self, exons):
+        '''
+        For a set of transcripts, return how many exons each one has.
+        '''
         exon_number_dict = {}
         for i in exons:
             if len(exons[i]) > 0:
@@ -506,7 +614,13 @@ class Feature_Set(object):
         return(exon_number_dict)
 
     def get_exon_ranks(self, exons, reverse = False, limit = None):
+        '''
+        For a set of exons, determine the rank of each one.
+        Return a dictionary with ranks as keys and corresponding
+        exons as values.
+        '''
         ranks_dict = {}
+        #if you don't want to consider any ranks beyond a certain maximal rank
         if limit:
             max_rank = limit
         else:
@@ -519,12 +633,16 @@ class Feature_Set(object):
         return(ranks_dict)
 
     def get_exons(self):
+        '''
+        Get all the exon features for your data set.
+        '''
         exons_dict = {}
         for i in self.names:
             exons_dict[i] = []
         for i in self.features:
             if i[1] == "exon":
                 exons_dict[i[4]].append(i)
+        #for transcripts on the antisense strand, store exons in reverse order
         for i in self.names:
             if exons_dict[i]:
                 if exons_dict[i][0][6] == "+":
@@ -534,8 +652,12 @@ class Feature_Set(object):
         return(exons_dict)
 
     def get_exon_sizes_by_rank(self, exons, rank):
+        '''
+        For a set of transcripts, get the length of the rankth exon of each one.
+        '''
         exon_sizes = {}
         for i in self.names:
+            #if this transcript doesn't have an exon of that rank
             if len(exons[i]) <= rank:
                 exon_sizes[i] = None
             else:
@@ -548,15 +670,23 @@ class Feature_Set(object):
                 exon_sizes[i] = current_coords[rank][3] - current_coords[rank][2] + 1
         return(exon_sizes)
 
-    def get_family_from_id(self,name):
+    def get_family_from_id(self, name):
+        '''
+        Given a transcript ID, determine what family it belongs to. If it doesn't belong to any,
+        return None.
+        '''
         for family, ids in self.families.items():
             if name in ids:
                 return(family)
         return(None)
 
     def get_flanking_intron_sizes(self, exons):
+        '''
+        For a set of exons, determine the sizes of the flanking introns.
+        '''
         intron_sizes = {}
         for i in self.names:
+            #single-exon genes have no introns
             if len(exons[i]) < 2:
                 intron_sizes[i] = None
             else:
@@ -565,9 +695,11 @@ class Feature_Set(object):
                     current_intron_sizes = [exons[i][j+1][2] - exons[i][j][3] - 1 for j in range(len(exons[i]) - 1)]
                 elif exons[i][0][6] == "-":
                     current_intron_sizes = [exons[i][j][2] - exons[i][j+1][3] - 1 for j in range(len(exons[i]) - 1)]
+                #sanity check
                 if len([k for k in current_intron_sizes if k < 1]) != 0:
                     print("Returned negative intron size!")
                     sys.exit()
+                #the upstream and downstream flanking introns are the same, except that you set either the first or the last one to None
                 intron_sizes[i]["upstream"] = [None]
                 intron_sizes[i]["upstream"].extend(current_intron_sizes)
                 intron_sizes[i]["downstream"] = current_intron_sizes
@@ -575,21 +707,30 @@ class Feature_Set(object):
         return(intron_sizes)
 
     def get_gene_name_dict(self, transcripts):
+        '''
+        Given a set of transcripts, return a dictionary that associates gene IDs to corresponding transcript IDs.
+        '''
         gene_name_dict = {}
         transcripts = list(transcripts.values())
         for i in transcripts:
             if i[5] in gene_name_dict.keys():
+                #add to existing entry
                 gene_name_dict[i[5]].append(i[4])
             else:
+                #create new entry
                 gene_name_dict[i[5]] = [i[4]]
         return(gene_name_dict)
 
     def get_intron_densities(self, exons, CDS):
+        '''
+        For a set of transcripts, calculate intron density (number of introns per bp of CDS).
+        '''
         intron_densities = {}
         for i in self.names:
             if not exons[i] or not CDS[i]:
                 intron_densities[i] = None
             else:
+                #intron number = exon_number - 1
                 current_exon_number = len(exons[i]) - 1
                 current_CDS_lengths = [j[0][3] - j[0][2] + 1 for j in CDS[i]]
                 current_CDS_length = sum(current_CDS_lengths)
@@ -597,6 +738,9 @@ class Feature_Set(object):
         return(intron_densities)
 
     def get_introns(self):
+        '''
+        Get all intron features correpsonding to current data set.
+        '''
         introns_dict = {}
         for i in self.names:
             introns_dict[i] = []
@@ -612,6 +756,12 @@ class Feature_Set(object):
         return(introns_dict)
 
     def get_introns_from_coords(self, exons, upstream = None, downstream = None):
+        '''
+        Infer intron coordinates from a set of exon coordinates.
+        With the upstream and downstream options, you can only get the specified
+        number of basepairs in the intron (either immediately downstream
+        or upstream from an exon) rather than getting the whole exon.
+        '''
         if upstream and downstream:
             print("You cannot restrict both the upstream and downstream distance to the exon!")
             raise Exception
@@ -620,20 +770,25 @@ class Feature_Set(object):
             upstream_local = upstream
             downstream_local = downstream
             introns[trans] = []
+            #if the transcript is on the antisense strand, downstream becomes upstream
+            #and the other way around
             if exons[trans][0][6] == "-":
                 upstream_local = downstream
                 downstream_local = upstream
             if len(exons[trans]) > 1:
                 if exons[trans][0][2] > exons[trans][1][2]:
                     exons[trans] = [i for i in reversed(exons[trans])]
+            #determine the intron start and end coordinates
             starts = [i[3] + 1 for i in exons[trans][:-1]]
             ends = [i[2] - 1 for i in exons[trans][1:]]
+            #trim coordinates if necessary
             if upstream_local:
                 starts = [i - upstream_local + 1 for i in ends]
             if downstream_local:
                 ends = [i + downstream_local - 1 for i in starts]
             coords = zip(starts, ends)
             template = exons[trans][0]
+            #format intron coordinates
             for coord in coords:
                 current_intron = template.copy()
                 current_intron[1] = "intron"
@@ -643,6 +798,10 @@ class Feature_Set(object):
         return(introns)
 
     def get_lengths(self, feature, CDS = False):
+        '''
+        For genomic features associated to a set of transcripts, get the
+        total length of the features associated to each transcript.
+        '''
         lengths_dict = {}
         if not CDS:
             #this is in case it's, for instance, a transcript feature where the values are lists
@@ -665,13 +824,20 @@ class Feature_Set(object):
         return(lengths_dict)
 
     def get_mean_intron_sizes(self, transcripts, exons):
+        '''
+        For a set of transcripts, calculate the mean intron size for each one.
+        '''
         mean_intron_sizes = {}
         for i in self.names:
+            #infer total amount of intronic sequence by subtracting the length of
+            #exonic sequence from the length of transcript sequence
             transcript_length = transcripts[i][3] - transcripts[i][2] + 1
             exonic_length = sum([(j[3] - j[2] + 1) for j in exons[i]])
             intronic_length = transcript_length - exonic_length
+            #infer mean intron size by dividing by the number of introns
             if len(exons[i]) > 1:
                 mean_intron_sizes[i] = intronic_length/(len(exons[i]) - 1)
+                #sanity check
                 if mean_intron_sizes[i] < 0:
                     print("Returned negative mean intron size!")
                     print(exons[i])
@@ -684,11 +850,17 @@ class Feature_Set(object):
         return(mean_intron_sizes)
 
     def get_singletons(self):
+        '''
+        Get the IDs of transcripts that don't belong to families.
+        '''
         flat_families = flatten(list(self.families.values()))
         singletons = [i for i in self.names if i not in flat_families]
         return(singletons)
 
     def get_start_codons(self):
+        '''
+        Get the start codon features associated to a data set.
+        '''
         start_codon_dict = {}
         for i in self.names:
             start_codon_dict[i] = []
@@ -698,6 +870,9 @@ class Feature_Set(object):
         return(start_codon_dict)
 
     def get_stop_codons(self):
+        '''
+        Get the stop codon features associated to a data set.
+        '''
         stop_codon_dict = {}
         for i in self.names:
             stop_codon_dict[i] = []
@@ -707,6 +882,9 @@ class Feature_Set(object):
         return(stop_codon_dict)
 
     def get_transcripts(self, obligatory_coords = True):
+        '''
+        Get transcript features associated to the data set.
+        '''
         transcript_dict = {}
         for i in range((len(self.features)-1),-1,-1):
             if self.features[i][1] == "transcript":
@@ -718,9 +896,13 @@ class Feature_Set(object):
         return(transcript_dict)
 
     def get_UTRs(self, CDS):
+        '''
+        Get UTR features associated to the data set.
+        '''
         UTRs_dict = {}
         for i in self.names:
             UTRs_dict[i] = {5: [], 3: []}
+        #determine if it is a 5' or a 3' UTR and store them separately
         for i in self.features:
             if i[1] == "UTR":
                 if i[6] == "+":
@@ -742,10 +924,14 @@ class Feature_Set(object):
         return(UTRs_dict)
 
     def get_UTRs_new(self, exons, CDS):
+        '''
+        Get UTRs for your dataset if the genome annotations don't explicitly contain UTR features.
+        '''
         UTRs = {}
         for trans in exons:
             if trans in CDS:
                 UTRs[trans] = {}
+                #check strand
                 antisense = False
                 if exons[trans][0][6] == "-":
                     antisense = True
@@ -753,12 +939,15 @@ class Feature_Set(object):
                     if exons[trans][0][2] > exons[trans][1][2]:
                         exons[trans] = list(reversed(exons[trans]))
                         CDS[trans] = list(reversed(CDS[trans]))
+                #get exon start and end coordinates
                 exon_starts = [i[2] for i in exons[trans]]
                 exon_ends = [i[3] for i in exons[trans]]
+                #check where the CDS starts and ends
                 CDS_start = CDS[trans][0][0][2]
                 CDS_end = CDS[trans][-1][0][3]
                 upstream = []
                 downstream = []
+                #find in which exon the CDS starts and format the corresponding UTR element
                 rank = 0
                 while CDS_start > exon_starts[rank]:
                     template = exons[trans][rank].copy()
@@ -771,6 +960,7 @@ class Feature_Set(object):
                     rank = rank + 1
                     if rank >= len(exon_starts):
                         break
+                #find in which exon the CDS ends and format the corresponding UTR element
                 rank = -1
                 while CDS_end < exon_ends[rank]:
                     template = exons[trans][rank].copy()
@@ -783,6 +973,7 @@ class Feature_Set(object):
                     rank = rank - 1
                     if -rank > len(exon_starts):
                         break
+                #set the upstream and downstream UTR elements as either 3' or 5' depending on strand
                 if antisense:
                     UTRs[trans][5] = downstream
                     UTRs[trans][3] = list(reversed(upstream))
@@ -792,15 +983,20 @@ class Feature_Set(object):
         return(UTRs)
        
     def load_sequences(self, feature, file = None):
+        '''
+        Load the sequences corresponding to a set of features.
+        '''
         if file:
             names, sequences = rw.read_fasta(file)
         else:
+            #default
             names, sequences = rw.read_fasta("{0}_{1}_{2}.fasta".format(self.features_file_name[:-4], self.dataset, feature))
         feature_dict = {}
         name_pattern = re.compile("E[A-Z0-9]*(?=_)")
+        #store sequences in dictionary
         for i in self.names:
             feature_dict[i] = []
-        for i,j in enumerate(names):
+        for i, j in enumerate(names):
             current_name = re.findall(name_pattern, j)
             current_name = current_name[0]
             feature_dict[current_name].append(sequences[i])
@@ -844,13 +1040,19 @@ class Feature_Set(object):
         
 
     def pick_random_members(self):
+        '''
+        Pick a random member from each family.
+        '''
         picked = []
         flat_families = flatten(list(self.families.values()))
+        #genes that don't belong to any of the families go directly into the output list
         for i in self.names:
             if i not in flat_families:
                 picked.append(i)
+        #get a random gene from each family
         for i in self.families:
             picked.append(random.choice(self.families[i]))
+        #sanity check
         expected_size = len(self.names) - len(flat_families) + len(self.families)
         if len(picked) != expected_size:
             print("Problem picking random members!")
@@ -859,6 +1061,9 @@ class Feature_Set(object):
         return(picked)
 
     def pick_shortest_pc_trans(self, gene_name_dict, CDS):
+        '''
+        Pick the transcript with the fewest number of exons from each family.
+        '''
         picked_transcripts = []
         for i in gene_name_dict:
             current_CDS = {}
@@ -876,7 +1081,12 @@ class Feature_Set(object):
         return(picked_transcripts)
 
     def set_dataset(self, dataset_name, input_list = None, verbose = True):
-        dataset_file_name = "{0}_{1}_dataset_features.bed".format(self.features_file_name[:-4],dataset_name)
+        '''
+        Load an existing dataset from file.
+        '''
+        #contains those features from a GTF that are relevant to the current dataset.
+        #filtering a GTF is slow, which is why it's good to have stored the relevant features.
+        dataset_file_name = "{0}_{1}_dataset_features.bed".format(self.features_file_name[:-4], dataset_name)
         try:
             self.features = rw.read_many_fields(dataset_file_name, "\t")
             self.features = [[i[0], i[1], int(i[2]), int(i[3]), i[4], i[5], i[6], i[7]] for i in self.features[1:]]
@@ -901,13 +1111,20 @@ class Feature_Set(object):
                 raise FileNotFoundError
 
     def trans_per_gene(self, gene_name_dict):
+        '''
+        Randomly pick one transcript from each gene.
+        '''
         picked = []
         for gene in gene_name_dict:
             to_add = random.choice(gene_name_dict[gene])
+            #store transcript ID
             picked.append(to_add[4])
         return(picked)
 
     def write_CDS(self, coords, file = None, input_list = None):
+        '''
+        Write the CDS sequences from a dataset to FASTA file.
+        '''
         if not file:
             file = "{0}_{1}_CDS.fasta".format(self.features_file_name[:-4], self.dataset)
         output_file = open(file, "w")
@@ -919,8 +1136,10 @@ class Feature_Set(object):
         output_file.close()
 
     def write_full_CDS(self, coords, file = None, input_list = None, check_ORF = True, bare_name = False, gene_name = False, PTC_check = False):
-        '''Take a set of coordinates containing the CDS of a given transcript, get the corresponding
-        sequence (concatenated) and write it to file. If input_list, only do it for those CDS specified in the list.'''
+        '''
+        Take a set of coordinates containing the CDS of a given transcript, get the corresponding
+        sequence (concatenated) and write it to file. If input_list, only do it for those CDS specified in the list.
+        '''
         stop_codon_dict = self.get_stop_codons()
         if not file:
             file = "{0}_{1}_full_CDS.fasta".format(self.features_file_name[:-4], self.dataset)
@@ -989,6 +1208,9 @@ class Feature_Set(object):
                     return(sequence)
 
 def bed_from_coords(coords, bed):
+    '''
+    Convert a set of feature elements to BED format and write to file.
+    '''
     with open(bed, "w") as file:
         for coord in coords:
             if coord:
@@ -996,54 +1218,6 @@ def bed_from_coords(coords, bed):
                 current_list = [str(i) for i in current_list]
                 file.write("\t".join(current_list))
                 file.write("\n")
-
-def filter_features(file_name,input_list,start,stop,gene_pattern,transcript_pattern,gene_name_pattern, filter_trans, input_type):
-    '''Read the file file_name between bytes start and stop. Keep only those features that correspond to
-    transcript IDs in input_list.'''
-    with open(file_name) as input_file:
-        input_file.seek(start)
-        lines = input_file.readlines(stop - start - 1)
-        to_keep = []
-        counter = 0
-        if input_type == "gene":
-            temp_transcript_pattern = transcript_pattern
-            temp_gene_pattern = gene_pattern
-            transcript_pattern = temp_gene_pattern
-            gene_pattern = temp_transcript_pattern
-        for i in lines:
-            counter = counter + 1
-            i = i.split("\t")
-            text_column = i[8]
-            match_obj = re.search(transcript_pattern, text_column)
-            try:
-                current_id = match_obj.group(0)
-                if filter_trans:
-                    go = current_id in input_list
-                else:
-                    go = True
-                if go:
-                    match_obj = re.search(gene_pattern, text_column)
-                    try:
-                        current_gene_ID = match_obj.group(0)
-                        match_obj = re.search(gene_name_pattern, text_column)
-                        try:
-                            current_gene_name = match_obj.group(0)
-                            if "\"" in current_gene_name:
-                                print("Error extracting gene names!")
-                                print(current_gene_name)
-                                sys.exit()
-                        except AttributeError:
-                            current_gene_name = "no_gene_name"
-                            print(text_column)
-                        if input_type == "gene":
-                            to_keep.append([i[0],i[2],int(i[3]),int(i[4]),current_gene_ID,current_id,i[6],current_gene_name])
-                        else:
-                            to_keep.append([i[0],i[2],int(i[3]),int(i[4]),current_id,current_gene_ID,i[6],current_gene_name])
-                    except AttributeError:
-                        pass
-            except AttributeError:
-                pass
-    return(to_keep)
 
 class Feature_Subset(Feature_Set):
 
@@ -1060,6 +1234,9 @@ class Feature_Subset(Feature_Set):
             pass
 
     def create_new_features_file(self, output_file_name):
+        '''
+        Get a features file and filter it to only keep the transcripts in the Feature_Subset.
+        '''
         regex = "\|".join(self.names)
         regex = regex + "\|#"
         run_process(["grep", regex], file_for_input = self.features_file_name, file_for_output = output_file_name)
@@ -1080,6 +1257,9 @@ class Feature_Subset(Feature_Set):
         return(picked)
 
 def add_trans_IDs_to_bed(bed_file_name, transcripts, output_file_name, two_strands = False):
+    '''
+    Annotate a BED file to specify the ID of the overlapping transcript.
+    '''
     file_prefix = bed_file_name[:-4]
     features_bed_file_name = "temp_bed_file{0}.bed".format(random.random())
     unsorted_bed_file_name = "{0}_unsorted.bed".format(features_bed_file_name[:-4])
@@ -1126,7 +1306,22 @@ def add_trans_IDs_to_bed(bed_file_name, transcripts, output_file_name, two_stran
         remove_file(pos_file_name)
         remove_file(neg_file_name)
 
+def bed_from_coords(coords, bed):
+    '''
+    Convert a set of feature elements to BED format and write to file.
+    '''
+    with open(bed, "w") as file:
+        for coord in coords:
+            if coord:
+                current_list = [coord[0], coord[2] - 1, coord[3], coord[4], "100", coord[6]]
+                current_list = [str(i) for i in current_list]
+                file.write("\t".join(current_list))
+                file.write("\n")
+
 def bed_lengths(input_data):
+    '''
+    Calculate the combined length of the features in a BED file.
+    '''
     #test whether you have a file name or a list of bed records
     file = False
     if type(input_data) == str:
@@ -1142,6 +1337,11 @@ def bed_lengths(input_data):
     return(total_length)
 
 def bed_to_CDS_indices(bed_record, CDS, check_density = False, sequence = None, motifs = None, motif_lengths = None, mismatch_warning_only = False):
+    '''
+    Given CDS coordinates and a set of overlapping BED coordinates,
+    convert the absolute BED coordinates into relative coordinates
+    specifying position in the CDS (base 0).
+    '''
     #remove phase information
     CDS = [i[0] for i in CDS]
     #convert to base 1
@@ -1157,11 +1357,16 @@ def bed_to_CDS_indices(bed_record, CDS, check_density = False, sequence = None, 
             raise Exception
         return(["error"])
     CDS_match = CDS_match[0]
+    #get cumulative length of CDS chunks up to relevant chunk
     cum_length = int(np.sum(np.array([i[3] - i[2] + 1 for i in CDS[:CDS_match]])))
+    #convert to relative coordinates
     if CDS[0][6] == "+":
         relative_hit_start = cum_length + (hit_start - CDS[CDS_match][2])
     elif CDS[0][6] == "-":
         relative_hit_start = cum_length + (CDS[CDS_match][3] - hit_end)
+    #if the BED features are meant to represent clusters of motif hits,
+    #you can check that the correpsonding CDS regions have a motif density of 1
+    #because if they don't, you've gone wrong somewhere
     indices = list(range(relative_hit_start, relative_hit_start + hit_end - hit_start + 1))
     if check_density:
         test_sequence = "".join([sequence[i] for i in indices])
@@ -1237,6 +1442,7 @@ def convert_pos_to_bed(positions, bed_data):
     Given a feature from a bed file and contiguous relative 0-based coordinates within the feature, convert coordinates to bed format.
     '''
     result = bed_data.copy()
+    #check strand
     if bed_data[5] == "+":
         reverse = False
     elif bed_data[5] == "-":
@@ -1295,6 +1501,7 @@ def fasta_from_intervals(bed_file, fasta_file, genome, force_strand = True, name
     '''
     genome_fasta = "Genomes/{0}/{0}.fa".format(genome)
     bedtools_args = ["bedtools", "getfasta", "-s", "-fi", genome_fasta, "-bed", bed_file, "-fo", fasta_file]
+    #the -s is for strand
     if not force_strand:
         del bedtools_args[2]
     if names:
@@ -1303,6 +1510,56 @@ def fasta_from_intervals(bed_file, fasta_file, genome, force_strand = True, name
     names, seqs = rw.read_fasta(fasta_file)
     seqs = [i.upper() for i in seqs]
     rw.write_to_fasta(names, seqs, fasta_file)
+
+def filter_features(file_name, input_list, start, stop, gene_pattern, transcript_pattern, gene_name_pattern, filter_trans, input_type):
+    '''
+    Read the file file_name between bytes start and stop. Keep only those features that correspond to
+    transcript IDs in input_list.
+    '''
+    with open(file_name) as input_file:
+        input_file.seek(start)
+        lines = input_file.readlines(stop - start - 1)
+        to_keep = []
+        counter = 0
+        if input_type == "gene":
+            temp_transcript_pattern = transcript_pattern
+            temp_gene_pattern = gene_pattern
+            transcript_pattern = temp_gene_pattern
+            gene_pattern = temp_transcript_pattern
+        for i in lines:
+            counter = counter + 1
+            i = i.split("\t")
+            text_column = i[8]
+            match_obj = re.search(transcript_pattern, text_column)
+            try:
+                current_id = match_obj.group(0)
+                if filter_trans:
+                    go = current_id in input_list
+                else:
+                    go = True
+                if go:
+                    match_obj = re.search(gene_pattern, text_column)
+                    try:
+                        current_gene_ID = match_obj.group(0)
+                        match_obj = re.search(gene_name_pattern, text_column)
+                        try:
+                            current_gene_name = match_obj.group(0)
+                            if "\"" in current_gene_name:
+                                print("Error extracting gene names!")
+                                print(current_gene_name)
+                                sys.exit()
+                        except AttributeError:
+                            current_gene_name = "no_gene_name"
+                            print(text_column)
+                        if input_type == "gene":
+                            to_keep.append([i[0],i[2],int(i[3]),int(i[4]),current_gene_ID,current_id,i[6],current_gene_name])
+                        else:
+                            to_keep.append([i[0],i[2],int(i[3]),int(i[4]),current_id,current_gene_ID,i[6],current_gene_name])
+                    except AttributeError:
+                        pass
+            except AttributeError:
+                pass
+    return(to_keep)
 
 def get_GO_terms(gene_names, obo_file_name, go_file_name, pool = False):
     '''Take a list of HGNC gene names and return a set of GO annotations for each.'''
@@ -1331,7 +1588,9 @@ def get_GO_terms(gene_names, obo_file_name, go_file_name, pool = False):
         return(annotations_list)
                 
 def get_introns_GTF(input_file_name, output_file_name, metadata = True):
-    '''Take a GTF features file and create a GTF file that has the coordinates of the introns.'''
+    '''
+    Take a GTF features file and create a GTF file that has the coordinates of the introns.
+    '''
     temp_exons_file_name = "temp_data/temp_exons_file{0}.gtf".format(random.random())
     temp_transcripts_file_name = "temp_data/temp_transcripts_file{0}.gtf".format(random.random())
     temp_exons_file_name_full = "{0}/{1}".format(os.getcwd(),temp_exons_file_name)
@@ -1374,12 +1633,14 @@ def get_introns_GTF(input_file_name, output_file_name, metadata = True):
     os.remove(temp_transcripts_file_name)
 
 def get_sequence(coords, genome, impose_strand = False, bed_input = False):
-    '''Get the sequence corresponding to the 1-based coords of a feature from a genome sequence.
+    '''
+    Get the sequence corresponding to the 1-based coords of a feature from a genome sequence.
     If a list of features is given, the resulting sequences will be concatenated in the order in which they appear
     in the list (reversed order if impose_strand is True and the feature is on the - strand).
     OPTIONS
     impose_strand: if True, the reverse complement of the genome sequence will be returned for features on the - strand.
-    False by default.'''
+    False by default.
+    '''
     file_name = "Genomes/{0}/{0}.fa".format(genome)
     genome_seq = Fasta("Genomes/{0}/{0}.fa".format(genome))
     if bed_input:
@@ -1415,7 +1676,8 @@ def get_sequence(coords, genome, impose_strand = False, bed_input = False):
 
 def intersect_bed(input_list, bed_file, overlap = False, write_both = False, sort = False,
                   force_strand = False, modify_chr_ids = False, no_name_check = False, no_dups = True, chrom = None, use_bedops = False, bed_input = False):
-    '''Use bedtools/bedops to intersect coordinates from a 1-based features list with a 0-based bedfile.
+    '''
+    Use bedtools/bedops to intersect coordinates from a 1-based features list with a 0-based bedfile.
     Return those features in the input list that overlap with coordinates in the bed file.
     OPTIONS
     overlap: minimum overlap required as a fraction of the features in the input list
@@ -1426,7 +1688,8 @@ def intersect_bed(input_list, bed_file, overlap = False, write_both = False, sor
     no_dups: keeps those entries in the input list that have any overlaps to elements in the bed file
     without duplicating input_list features in the case of multiple overlaps.
     see intersect_bed_return_bed for other options.
-    bed_input: input_list is a list of bed-records (base 0 ) rather than features (base 1)'''
+    bed_input: input_list is a list of bed-records (base 0 ) rather than features (base 1)
+    '''
     temp_file_name = "temp_data/temp_bed_file{0}.bed".format(random.random())
     temp_file_name_full = "{0}/{1}".format(os.getcwd(),temp_file_name)
     bed_file_name_full = "{0}/{1}".format(os.getcwd(),bed_file)
@@ -1490,14 +1753,20 @@ def intersect_bed_return_bed(bed_file, input_list, use_bedops = False, overlap =
     return(bedtools_output)
 
 def matches_to_bed(bed_record, matches):
+    '''
+    Given a set of relative position indices within a BED record,
+    convert each contiguous cluster into a BED record.
+    '''
     first_cluster_start = [matches[0]]
     last_cluster_end = [matches[-1]]
+    #find positions where there is a gap between match nucleotides
     cluster_starts = [j for i, j in enumerate(matches[1:]) if j - matches[i] != 1]
     first_cluster_start.extend(cluster_starts)
     cluster_starts = first_cluster_start
     cluster_ends = [j for i, j in enumerate(matches[:-1]) if matches[i+1] - j != 1]
     cluster_ends.extend(last_cluster_end)
     strand = bed_record[5]
+    #convert relative cluster start and end positions into absolute chromosome coordinate ranges
     if strand == "+":
         feature_start = int(bed_record[1])
         cluster_ranges = [(cluster_starts[i] + feature_start, cluster_ends[i] + feature_start + 1) for i in range(len(cluster_starts))]
@@ -1510,29 +1779,47 @@ def matches_to_bed(bed_record, matches):
     return(new_records)
 
 def merge_intervals(input_file, output_file, force_strand = True):
+    '''
+    Use Bedtools to merge two BED files.
+    '''
+    #have bedtools write output to temp file
     temp_file_name = "temp_data/temp_bed_file{0}.bed".format(random.random())
     bedtools_args = ["mergeBed", "-s", "-c", "4,5,6", "-o", "distinct,distinct,distinct", "-i", input_file]
     if not force_strand:
         del bedtools_args[1]
     run_process(bedtools_args, file_for_output = temp_file_name)
+    #read in the temp file
     bed_data = rw.read_many_fields(temp_file_name, "\t")
+    #reformat entries and write to output file
     bed_data = [[i[0], i[1], i[2], i[4], i[5], i[3]] for i in bed_data]
     rw.write_to_csv(bed_data, output_file, "\t")
+    #delete temp file
     os.remove(temp_file_name)
 
 def modify_chr(chr_id):
-    '''Take a bare chromosome name and prefix "chr" to it, except if it's one of
-    the weird ones.'''
+    '''
+    Take a bare chromosome name and prefix "chr" to it, except if it's one of
+    the weird ones.
+    '''
     if chr_id[0] not in ["C", "c", "J", "G"]:
         chr_id = "chr{0}".format(chr_id)
     return(chr_id)
 
 def region_indices_to_full_indices(region_indices, location_indices):
+    '''
+    Given absolute position indices (location_indices) and relative
+    indices for a subset of positions,
+    convert relative to absolute coordinates.
+    '''
     start_pos = location_indices[0]
     full_indices = [i + start_pos for i in region_indices]
     return(full_indices)
 
 def run_bedops(A_file, B_file, force_strand = False, write_both = False, chrom = None, overlap = None, sort = False, output_file = None, intersect = False):
+    '''
+    Wraps bedops intersect/element-of. See intersect_bed family of functions
+    for details on options etc.
+    '''
     sorting_temp_file_name = "{0}/temp_data/temp_sort_{1}.bed".format(os.getcwd(), random.random())
     sorting_temp_file_name2 = "{0}/temp_data/temp_sort2_{1}.bed".format(os.getcwd(), random.random())
     if intersect:
@@ -1565,6 +1852,10 @@ def run_bedops(A_file, B_file, force_strand = False, write_both = False, chrom =
     return(bedops_output)
 
 def run_bedtools(A_file, B_file, force_strand = False, write_both = False, chrom = None, overlap = None, sort = False, no_name_check = False, no_dups = True, hit_number = False, output_file = None, intersect = False):
+    '''
+    Wraps bedtools intersectBed. See intersect_bed family of functions
+    for details on options etc.
+    '''
     if write_both:
         write_option = "-wo"
     elif hit_number:
@@ -1592,15 +1883,21 @@ def run_bedtools(A_file, B_file, force_strand = False, write_both = False, chrom
     return(bedtools_output)
 
 def separate_strands(input_file, output_file_prefix, strand_column):
+    '''
+    Given an input BED file, write one output BED file conatining intervals on the positive
+    strand and one containing intervals on the negative strand.
+    '''
     pos_file_name = "{0}_pos.bed".format(output_file_prefix)
     run_process(["awk", "${0} == \"+\"".format(strand_column)], file_for_input = input_file, file_for_output = pos_file_name)
     neg_file_name = "{0}_neg.bed".format(output_file_prefix)
     run_process(["awk", "${0} == \"-\"".format(strand_column)], file_for_input = input_file, file_for_output = neg_file_name)
 
 def sort_coords(coords_to_sort, index, reverse = False):
-    '''Sort a list of features based on the coordinate in column 'index'.
+    '''
+    Sort a list of features based on the coordinate in column 'index'.
     OPTIONS
-    reverse: if True, sort the list in descending order. False by default.'''
+    reverse: if True, sort the list in descending order. False by default.
+    '''
     if reverse:
         sorted_coords = sorted(coords_to_sort, key = lambda x:x[index], reverse = True)
     else:
@@ -1608,16 +1905,24 @@ def sort_coords(coords_to_sort, index, reverse = False):
     return(sorted_coords)
 
 def sort_bed(input_file_name, output_file_name):
+    '''
+    Use bedtools to sort a BED file. A wrapper is needed so you could
+    specify the same file as input and output, overwriting the original file.
+    '''
     temp_file_name = "temp_data/temp_sorted_bed.bed"
     run_process(["sort-bed", input_file_name], file_for_output = temp_file_name)
     run_process(["mv", temp_file_name, output_file_name])
 
 def trim_sequence_coords(coords, phase):
+    '''
+    Trim sequence coordinates so the sequence would both start and end with a full codon.
+    '''
     if coords[6] == "+":
         strand = "pos"
     elif coords[6] == "-":
         strand = "neg"
     if strand == "pos":
+        #starts with full codon so nothing to trim there
         if phase == 0:
             pass
         elif phase == 1:
@@ -1627,6 +1932,8 @@ def trim_sequence_coords(coords, phase):
         else:
             print("Invalid phase information!")
             sys.exit()
+        #check if after trimming the start, the resulting sequence has full codons
+        #or whether you still need to trim from the end
         seq_length = coords[3] - coords[2] + 1
         if seq_length%3 == 0:
             pass
@@ -1634,6 +1941,7 @@ def trim_sequence_coords(coords, phase):
             coords[3] = coords[3] - 1
         else:
             coords[3] = coords[3] - 2
+    #same logic for negative strand
     elif strand == "neg":
         if phase == 0:
             pass
@@ -1655,7 +1963,7 @@ def trim_sequence_coords(coords, phase):
 
 def uniquify_lines(input_file, output_file, sort = False):
     '''
-    Uniquify the lines in a file.
+    Uniquify the lines in a file. Also an option to sort first.
     '''
     with open(input_file) as file:
         input_data = file.readlines()

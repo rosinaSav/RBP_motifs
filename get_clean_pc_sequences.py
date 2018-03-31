@@ -1,3 +1,8 @@
+'''
+Author: Rosina Savisaar.
+Prepare a clean dataset of protein-coding genes.
+'''
+
 import argparse
 from bedtools_games import Feature_Set
 from conservation import check_ORF_integrity, keep_conserved_pc
